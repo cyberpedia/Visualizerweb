@@ -1,6 +1,8 @@
 import React, { useRef, useState } from "react";
 import { usePlayerStore, Track } from "../state/store";
 import { readTrackMeta } from "../utils/id3";
+import { computeWaveform } from "../utils/waveform";
+import { setAsset } from "../utils/db";
 
 const audioExt = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "webm"]);
 
@@ -18,14 +20,25 @@ const FileBrowser: React.FC = () => {
       if (!audioExt.has(ext)) continue;
       const url = URL.createObjectURL(f);
       const meta = await readTrackMeta(f);
+      const id = crypto.randomUUID();
+      let waveform: Uint8Array | undefined = undefined;
+      try {
+        const wf = await computeWaveform(f, 1024);
+        if (wf) {
+          waveform = wf;
+          // store in IndexedDB
+          await setAsset(`waveform:${id}`, wf.buffer);
+        }
+      } catch {}
       list.push({
-        id: crypto.randomUUID(),
+        id,
         name: meta.title || f.name,
         url,
         artist: meta.artist,
         album: meta.album,
         duration: meta.duration,
         artUrl: meta.artUrl || null,
+        waveform,
         file: f
       });
     }
@@ -50,14 +63,24 @@ const FileBrowser: React.FC = () => {
           const file = await (handle as FileSystemFileHandle).getFile();
           const url = URL.createObjectURL(file);
           const meta = await readTrackMeta(file);
+          const id = crypto.randomUUID();
+          let waveform: Uint8Array | undefined = undefined;
+          try {
+            const wf = await computeWaveform(file, 1024);
+            if (wf) {
+              waveform = wf;
+              await setAsset(`waveform:${id}`, wf.buffer);
+            }
+          } catch {}
           tracks.push({
-            id: crypto.randomUUID(),
+            id,
             name: meta.title || file.name,
             url,
             artist: meta.artist,
             album: meta.album,
             duration: meta.duration,
             artUrl: meta.artUrl || null,
+            waveform,
             file
           });
         } else if (handle.kind === "directory") {

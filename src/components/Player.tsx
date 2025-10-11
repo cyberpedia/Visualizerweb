@@ -4,13 +4,21 @@ import { usePlayerStore } from "../state/store";
 
 const Player: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const playlist = usePlayerStore((s) => s.playlist);
   const currentIndex = usePlayerStore((s) => s.currentIndex);
+  const currentTrack = playlist[currentIndex] || null;
   const setAnalyzer = usePlayerStore((s) => s.setAnalyzer);
   const playing = usePlayerStore((s) => s.playing);
   const setPlaying = usePlayerStore((s) => s.setPlaying);
   const volume = usePlayerStore((s) => s.volume);
   const setVolume = usePlayerStore((s) => s.setVolume);
+  const playbackRate = usePlayerStore((s) => s.playbackRate);
+  const setPlaybackRate = usePlayerStore((s) => s.setPlaybackRate);
+  const pan = usePlayerStore((s) => s.pan);
+  const setPan = usePlayerStore((s) => s.setPan);
+  const compressorOn = usePlayerStore((s) => s.compressorOn);
+  const setCompressorOn = usePlayerStore((s) => s.setCompressorOn);
   const eqGains = usePlayerStore((s) => s.eqGains);
   const next = usePlayerStore((s) => s.next);
   const prev = usePlayerStore((s) => s.prev);
@@ -28,6 +36,9 @@ const Player: React.FC = () => {
     audioEngine.attachAudioElement(el);
     setAnalyzer(audioEngine.getAnalyzer());
     audioEngine.setVolume(volume);
+    audioEngine.setPlaybackRate(playbackRate);
+    audioEngine.setPan(pan);
+    audioEngine.setCompressor(compressorOn);
   }, []);
 
   // Track change with simple crossfade
@@ -62,6 +73,9 @@ const Player: React.FC = () => {
         await el.play();
         setPlaying(true);
         audioEngine.resume();
+        audioEngine.setPlaybackRate(playbackRate);
+        audioEngine.setPan(pan);
+        audioEngine.setCompressor(compressorOn);
         // fade in to target volume
         audioEngine.fadeTo(0.35, volume);
       } catch {
@@ -87,6 +101,21 @@ const Player: React.FC = () => {
     audioEngine.setVolume(volume);
   }, [volume]);
 
+  // Playback rate
+  useEffect(() => {
+    audioEngine.setPlaybackRate(playbackRate);
+  }, [playbackRate]);
+
+  // Pan
+  useEffect(() => {
+    audioEngine.setPan(pan);
+  }, [pan]);
+
+  // Compressor
+  useEffect(() => {
+    audioEngine.setCompressor(compressorOn);
+  }, [compressorOn]);
+
   // Equalizer
   useEffect(() => {
     eqGains.forEach((db, i) => audioEngine.setEqGain(i, db));
@@ -109,6 +138,26 @@ const Player: React.FC = () => {
       el.removeEventListener("ended", onEnded);
     };
   }, [next]);
+
+  // Draw waveform
+  useEffect(() => {
+    const c = waveformCanvasRef.current;
+    const track = currentTrack;
+    if (!c || !track || !track.waveform) return;
+    const ctx = c.getContext("2d")!;
+    const w = c.width = c.clientWidth;
+    const h = c.height = 40;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#334155";
+    const data = track.waveform;
+    const len = data.length;
+    for (let i = 0; i < w; i++) {
+      const idx = Math.floor(i / w * len);
+      const v = data[idx] / 255;
+      const barH = Math.max(1, Math.round(v * h));
+      ctx.fillRect(i, (h - barH) / 2, 1, barH);
+    }
+  }, [currentTrack?.id]);
 
   const fmt = (s: number) => {
     if (!s || !isFinite(s)) return "0:00";
@@ -190,6 +239,46 @@ const Player: React.FC = () => {
             className="flex-1 accent-brand-500"
           />
         </div>
+
+        <div className="flex items-center gap-2 w-52">
+          <span className="text-xs text-gray-300">Speed</span>
+          <input
+            type="range"
+            min={0.5}
+            max={2}
+            step={0.01}
+            value={playbackRate}
+            onChange={(e) => setPlaybackRate(Number(e.target.value))}
+            className="flex-1 accent-brand-500"
+            title="Playback speed (affects pitch)"
+          />
+        </div>
+
+        <label className="flex items-center gap-1 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            checked={compressorOn}
+            onChange={(e) => setCompressorOn(e.target.checked)}
+          />
+          Compressor
+        </label>
+
+        <div className="flex items-center gap-2 w-44">
+          <span className="text-xs text-gray-300">Pan</span>
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.01}
+            value={pan}
+            onChange={(e) => setPan(Number(e.target.value))}
+            className="flex-1 accent-brand-500"
+            title="Stereo pan"
+          />
+        </div>
+      </div>
+      <div className="mt-2">
+        <canvas ref={waveformCanvasRef} className="w-full h-10 block bg-gray-900/40 rounded" />
       </div>
     </div>
   );

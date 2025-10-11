@@ -9,6 +9,8 @@ export class AudioEngine {
   source: MediaElementAudioSourceNode | null = null;
   gainNode: GainNode | null = null;
   eqNodes: BiquadFilterNode[] = [];
+  compressor: DynamicsCompressorNode | null = null;
+  panner: StereoPannerNode | null = null;
   analyzer: AnalyserNode | null = null;
   streamDest: MediaStreamAudioDestinationNode | null = null;
 
@@ -34,6 +36,15 @@ export class AudioEngine {
     // setup chain
     this.gainNode = ctx.createGain();
     this.eqNodes = this.createEqNodes();
+    this.compressor = ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -10;
+    this.compressor.knee.value = 10;
+    this.compressor.ratio.value = 3;
+    this.compressor.attack.value = 0.003;
+    this.compressor.release.value = 0.25;
+
+    this.panner = ctx.createStereoPanner();
+    this.panner.pan.value = 0;
 
     this.analyzer = ctx.createAnalyser();
     this.analyzer.fftSize = 2048;
@@ -41,18 +52,23 @@ export class AudioEngine {
 
     this.streamDest = ctx.createMediaStreamDestination();
 
-    // connect source -> eq -> gain
+    // connect source -> eq -> compressor -> gain -> panner
     let node: AudioNode = this.source;
     for (const eq of this.eqNodes) {
       node.connect(eq);
       node = eq;
     }
-    node.connect(this.gainNode);
+    node.connect(this.compressor!);
+    node = this.compressor!;
+    node.connect(this.gainNode!);
+    node = this.gainNode!;
+    node.connect(this.panner!);
+    node = this.panner!;
 
     // tee to destination, analyzer, and streamDest
-    this.gainNode.connect(ctx.destination);
-    this.gainNode.connect(this.analyzer);
-    this.gainNode.connect(this.streamDest);
+    node.connect(ctx.destination);
+    node.connect(this.analyzer!);
+    node.connect(this.streamDest!);
   }
 
   resume() {
@@ -63,6 +79,34 @@ export class AudioEngine {
   setVolume(v: number) {
     if (!this.gainNode) return;
     this.gainNode.gain.value = Math.min(1, Math.max(0, v));
+  }
+
+  setPlaybackRate(r: number) {
+    if (!this.audioEl) return;
+    this.audioEl.playbackRate = Math.min(2, Math.max(0.5, r));
+  }
+
+  setPan(p: number) {
+    if (!this.panner) return;
+    this.panner.pan.value = Math.min(1, Math.max(-1, p));
+  }
+
+  setCompressor(on: boolean) {
+    // Always in chain; if off, relax ratio/threshold minimally
+    if (!this.compressor) return;
+    if (on) {
+      this.compressor.threshold.value = -10;
+      this.compressor.knee.value = 10;
+      this.compressor.ratio.value = 3;
+      this.compressor.attack.value = 0.003;
+      this.compressor.release.value = 0.25;
+    } else {
+      this.compressor.threshold.value = 0;
+      this.compressor.knee.value = 0;
+      this.compressor.ratio.value = 1;
+      this.compressor.attack.value = 0.001;
+      this.compressor.release.value = 0.05;
+    }
   }
 
   fadeTo(seconds: number, target: number) {

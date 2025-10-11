@@ -9,6 +9,7 @@ export type Track = {
   album?: string;
   duration?: number;
   artUrl?: string | null;
+  waveform?: Uint8Array; // decimated waveform for scrubber UI (not persisted)
   file?: File; // original file reference for offline export
 };
 
@@ -169,6 +170,9 @@ type PlayerState = {
   currentIndex: number;
   playing: boolean;
   volume: number; // 0..1
+  playbackRate: number; // 0.5..2
+  pan: number; // -1..1
+  compressorOn: boolean;
   eqGains: number[]; // length 10
   visualizerTemplate: TemplateConfig;
   analyzer: AnalyserNode | null;
@@ -191,6 +195,9 @@ type PlayerState = {
   setCurrentIndex: (idx: number) => void;
   setPlaying: (p: boolean) => void;
   setVolume: (v: number) => void;
+  setPlaybackRate: (r: number) => void;
+  setPan: (p: number) => void;
+  setCompressorOn: (on: boolean) => void;
   setEqGain: (band: number, db: number) => void;
   setAnalyzer: (an: AnalyserNode | null) => void;
   setTemplate: (t: Partial<TemplateConfig>) => void;
@@ -271,6 +278,9 @@ export const usePlayerStore = create<PlayerState>()(
       currentIndex: -1,
       playing: false,
       volume: 1,
+      playbackRate: 1,
+      pan: 0,
+      compressorOn: false,
       eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       visualizerTemplate: DEFAULT_TEMPLATE,
       analyzer: null,
@@ -337,6 +347,9 @@ export const usePlayerStore = create<PlayerState>()(
       setCurrentIndex: (idx) => set(() => ({ currentIndex: idx })),
       setPlaying: (p) => set(() => ({ playing: p })),
       setVolume: (v) => set(() => ({ volume: Math.min(1, Math.max(0, v)) })),
+      setPlaybackRate: (r) => set(() => ({ playbackRate: Math.min(2, Math.max(0.5, r)) })),
+      setPan: (p) => set(() => ({ pan: Math.min(1, Math.max(-1, p)) })),
+      setCompressorOn: (on) => set(() => ({ compressorOn: !!on })),
       setEqGain: (band, db) =>
         set((s) => {
           const next = s.eqGains.slice();
@@ -441,9 +454,19 @@ export const usePlayerStore = create<PlayerState>()(
     {
       name: "avee-web",
       partialize: (s) => ({
-        playlist: s.playlist,
+        playlist: s.playlist.map((t) => ({
+          id: t.id,
+          name: t.name,
+          url: t.url,
+          artist: t.artist,
+          album: t.album,
+          duration: t.duration
+        })),
         currentIndex: s.currentIndex,
         volume: s.volume,
+        playbackRate: s.playbackRate,
+        pan: s.pan,
+        compressorOn: s.compressorOn,
         eqGains: s.eqGains,
         visualizerTemplate: s.visualizerTemplate,
         exportSettings: s.exportSettings,
