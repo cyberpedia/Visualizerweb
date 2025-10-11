@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* App baseline styles */
+html, body, #root {
+  height: 100%;
+}
+
+.canvas-container {
+  position: relative;
+}
+
+.canvas-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+.scrollbar::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 6px;
+}
+.scrollbar::-webkit-scrollbar-track {
+  background: #111827;
+}
