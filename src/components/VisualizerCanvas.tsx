@@ -18,13 +18,9 @@ const VisualizerCanvas: React.FC = () => {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !analyzer) {
-      // register canvas element for exporter anyway
-      setCanvasEl(canvas || null);
-      return;
-    }
-
-    setCanvasEl(canvas);
+    // register canvas element for exporter
+    setCanvasEl(canvas || null);
+    if (!canvas || !analyzer) return;
 
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
@@ -57,6 +53,13 @@ const VisualizerCanvas: React.FC = () => {
 
     const onResize = () => resize();
     window.addEventListener("resize", onResize);
+
+    // If offline export is active, pause live RAF to avoid contention.
+    if (exportActive && exportSettings.engine === "offline") {
+      return () => {
+        window.removeEventListener("resize", onResize);
+      };
+    }
 
     const freqArr = new Uint8Array(analyzer.frequencyBinCount);
     const timeArr = new Uint8Array(analyzer.fftSize);
@@ -192,7 +195,8 @@ const VisualizerCanvas: React.FC = () => {
     exportActive,
     exportSettings.mode,
     exportSettings.width,
-    exportSettings.height
+    exportSettings.height,
+    exportSettings.engine
   ]);
 
   return (

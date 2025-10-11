@@ -11,6 +11,7 @@ const Exporter: React.FC = () => {
   const exportSettings = usePlayerStore((s) => s.exportSettings);
   const setExportSettings = usePlayerStore((s) => s.setExportSettings);
   const currentTrack = usePlayerStore((s) => s.playlist[s.currentIndex] ?? null);
+  const template = usePlayerStore((s) => s.visualizerTemplate);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -43,6 +44,7 @@ const Exporter: React.FC = () => {
             height: canvasEl.height,
             bitrate: exportSettings.bitrate || 4_000_000,
             track: currentTrack,
+            template,
             onProgress: (p, phase) => setOfflineProgress({ p, phase }),
             signal: abortCtrlRef.current.signal
           });
