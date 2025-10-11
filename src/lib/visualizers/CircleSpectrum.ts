@@ -13,7 +13,7 @@ function lerpColor(a: string, b: string, t: number) {
 
 const CircleSpectrum: Visualizer = {
   draw(frame) {
-    const { ctx, width, height, freq, template } = frame;
+    const { ctx, width, height, freq, template, beatPulse } = frame;
     clear(frame);
 
     const centerX = width / 2;
@@ -24,6 +24,8 @@ const CircleSpectrum: Visualizer = {
 
     ctx.save();
     ctx.translate(centerX, centerY);
+    ctx.shadowColor = template.color2;
+    ctx.shadowBlur = template.glowStrength ?? 0;
 
     const points = 128;
     for (let i = 0; i < points; i++) {
@@ -33,7 +35,7 @@ const CircleSpectrum: Visualizer = {
       const color = lerpColor(template.color1, template.color2, v);
 
       const r1 = baseRadius;
-      const r2 = baseRadius + v * 120;
+      const r2 = baseRadius + v * 120 * (1 + 0.15 * (beatPulse || 0));
 
       ctx.beginPath();
       ctx.strokeStyle = color;

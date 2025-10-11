@@ -22,7 +22,8 @@ const FileBrowser: React.FC = () => {
         url,
         artist: meta.artist,
         album: meta.album,
-        duration: meta.duration
+        duration: meta.duration,
+        artUrl: meta.artUrl || null
       });
     }
     if (list.length) addTracks(list);
@@ -49,8 +50,8 @@ const FileBrowser: React.FC = () => {
         url,
         artist: meta.artist,
         album: meta.album,
-        duration: meta.duration
-      });
+        duration: meta.duration,
+        artUrl;
     }
     if (tracks.length) addTracks(tracks);
   };

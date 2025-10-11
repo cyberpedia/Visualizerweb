@@ -8,9 +8,17 @@ export async function readTrackMeta(file: File) {
       file.name.replace(/\.[^/.]+$/, "");
     const artist = metadata.common.artist || "";
     const album = metadata.common.album || "";
-    return { title, artist, album, duration: metadata.format.duration || 0 };
+    let artUrl: string | null = null;
+    const pic = metadata.common.picture?.[0];
+    if (pic) {
+      try {
+        const blob = new Blob([pic.data], { type: pic.format || "image/jpeg" });
+        artUrl = URL.createObjectURL(blob);
+      } catch {}
+    }
+    return { title, artist, album, duration: metadata.format.duration || 0, artUrl };
   } catch {
     const title = file.name.replace(/\.[^/.]+$/, "");
-    return { title, artist: "", album: "", duration: 0 };
+    return { title, artist: "", album: "", duration: 0, artUrl: null };
   }
 }

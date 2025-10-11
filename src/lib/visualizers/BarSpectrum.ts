@@ -13,7 +13,7 @@ function lerpColor(a: string, b: string, t: number) {
 
 const BarSpectrum: Visualizer = {
   draw(frame) {
-    const { ctx, width, height, freq, template } = frame;
+    const { ctx, width, height, freq, template, beatPulse } = frame;
     clear(frame);
 
     const bars = template.barCount ?? 64;
@@ -25,11 +25,13 @@ const BarSpectrum: Visualizer = {
 
     ctx.save();
     ctx.translate(margin, height - margin);
+    ctx.shadowColor = template.color2;
+    ctx.shadowBlur = template.glowStrength ?? 0;
 
     for (let i = 0; i < bars; i++) {
       const idx = Math.floor((i / bars) * freq.length);
       const v = freq[idx] / 255;
-      const h = v * maxH;
+      const h = v * maxH * (1 + 0.15 * (beatPulse || 0));
       const color = lerpColor(template.color1, template.color2, v);
       ctx.fillStyle = color;
       ctx.fillRect(i * (barW + gap), -h, barW, h);

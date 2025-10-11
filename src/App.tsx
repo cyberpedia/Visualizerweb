@@ -4,6 +4,7 @@ import Player from "./components/Player";
 import VisualizerCanvas from "./components/VisualizerCanvas";
 import Equalizer from "./components/Equalizer";
 import TemplateEditor from "./components/TemplateEditor";
+import TemplateGallery from "./components/TemplateGallery";
 import Exporter from "./components/Exporter";
 import FileBrowser from "./components/FileBrowser";
 
@@ -43,6 +44,7 @@ export default function App() {
             <Equalizer />
           </div>
           <TemplateEditor />
+          <TemplateGallery />
         </aside>
       </main>
     </div>

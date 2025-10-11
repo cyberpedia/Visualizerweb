@@ -8,6 +8,7 @@ export type VisualizerFrame = {
   freq: Uint8Array;
   timeDomain: Uint8Array;
   template: TemplateConfig;
+  beatPulse: number; // 0..1, rises on beat and decays
   trackInfo?: {
     title?: string;
     artist?: string;
@@ -20,16 +21,12 @@ export type Visualizer = {
 
 export function clear(frame: VisualizerFrame) {
   const { ctx, width, height, template } = frame;
-  if (template.background) {
-    // Simple gradient background
-    const grad = ctx.createLinearGradient(0, 0, width, height);
-    grad.addColorStop(0, template.background);
-    grad.addColorStop(1, "#000000");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, width, height);
-  } else {
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#0b1020";
-    ctx.fillRect(0, 0, width, height);
+  ctx.clearRect(0, 0, width, height);
+  if (template.backgroundImageUrl) {
+    // When using an image background, do not fill here.
+    return;
   }
+  const bg = template.background ?? "#0b1020";
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
 }
