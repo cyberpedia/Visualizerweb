@@ -51,9 +51,46 @@ const Exporter: React.FC = () => {
         crf: 18,
         audioBitrateKbps: 320,
         pixelFormat: "yuv444p",
+        profile: "high444p",
         parallelWorkers: 1
       });
     }
+  };
+
+  const computeWarnings = (): string[] => {
+    const out: string[] = [];
+    const mode = exportSettings.mode;
+    const fps = exportSettings.fps || 30;
+    const dims = (() => {
+      if (mode === "1080p") return { width: 1920, height: 1080 };
+      if (mode === "720p") return { width: 1280, height: 720 };
+      if (mode === "custom") return { width: exportSettings.width ?? (canvasEl?.width || 1920), height: exportSettings.height ?? (canvasEl?.height || 1080) };
+      return { width: canvasEl?.width || 1920, height: canvasEl?.height || 1080 };
+    })();
+    const levelNum = exportSettings.level ? parseFloat(exportSettings.level) : NaN;
+
+    if (exportSettings.pixelFormat === "yuv444p") {
+      out.push("yuv444p has limited hardware decoder support. Use yuv420p for widest compatibility.");
+      if (exportSettings.profile && exportSettings.profile !== "high444p") {
+        out.push("yuv444p typically requires the High 4:4:4 Predictive profile (high444p).");
+      }
+    }
+
+    if (dims.height >= 1080 && fps >= 60 && (!exportSettings.level || (isFinite(levelNum) && levelNum < 4.1))) {
+      out.push("1080p60 H.264 commonly requires Level 4.1 or higher.");
+    } else if (dims.height >= 1080 && fps >= 30 && (!exportSettings.level || (isFinite(levelNum) && levelNum < 4.0))) {
+      out.push("1080p30 H.264 commonly requires Level 4.0 or higher.");
+    }
+
+    if (exportSettings.profile === "baseline") {
+      out.push("Baseline profile reduces compression efficiency; consider 'high' for better quality at the same bitrate.");
+    }
+
+    if (!exportSettings.forceCrf && (exportSettings.preset === "ultrafast" || exportSettings.preset === "superfast")) {
+      out.push("Bitrate with ultrafast/superfast preset may produce lower visual quality. Consider CRF or a slower preset.");
+    }
+
+    return out;
   };
 
   useEffect(() => {
@@ -422,6 +459,20 @@ const Exporter: React.FC = () => {
             ?
           </span>
         </div>
+
+        {(() => {
+          const warnings = computeWarnings();
+          return warnings.length > 0 ? (
+            <div className="mt-2 text-yellow-300">
+              <div className="mb-1">Compatibility/quality warnings:</div>
+              <ul className="list-disc ml-4">
+                {warnings.map((w, idx) => (
+                  <li key={idx}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null;
+        })()}
       </div>
     )
     }
