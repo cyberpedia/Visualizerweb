@@ -67,6 +67,90 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
       level: "4.1",
       parallelWorkers: 2
     }
+  },
+  // Additional built-ins
+  {
+    name: "4K 2160p (60fps)",
+    settings: {
+      mode: "custom",
+      width: 3840,
+      height: 2160,
+      fps: 60,
+      preset: "slow",
+      forceCrf: true,
+      crf: 20,
+      audioBitrateKbps: 320,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "5.2",
+      tune: "film",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "YouTube 1080p (Film)",
+    settings: {
+      mode: "1080p",
+      fps: 30,
+      preset: "medium",
+      forceCrf: true,
+      crf: 20,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "4.1",
+      tune: "film",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "Instagram Square 1080×1080",
+    settings: {
+      mode: "custom",
+      width: 1080,
+      height: 1080,
+      fps: 30,
+      preset: "fast",
+      forceCrf: true,
+      crf: 22,
+      audioBitrateKbps: 160,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "4.1",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "TikTok Vertical 1080×1920",
+    settings: {
+      mode: "custom",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      preset: "fast",
+      forceCrf: true,
+      crf: 22,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "4.1",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "Twitter 720p CBR",
+    settings: {
+      mode: "720p",
+      fps: 30,
+      preset: "faster",
+      forceCrf: false,
+      bitrate: 5_000_000,
+      audioBitrateKbps: 128,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "3.1",
+      parallelWorkers: 2
+    }
   }
 ];
 

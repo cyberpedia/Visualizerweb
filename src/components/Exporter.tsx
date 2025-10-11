@@ -21,6 +21,73 @@ const Exporter: React.FC = () => {
   const [showPresets, setShowPresets] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
 
+  const addPreset = usePlayerStore((s) => s.addExportPreset);
+  const exportPresetsList = usePlayerStore((s) => s.exportPresets);
+  const [importingJSON, setImportingJSON] = useState(false);
+
+  const quickSavePreset = () => {
+    const name = `Preset ${exportPresetsList.length + 1}`;
+    const s = exportSettings;
+    addPreset(name, {
+      engine: s.engine,
+      mode: s.mode,
+      width: s.width,
+      height: s.height,
+      fps: s.fps,
+      bitrate: s.bitrate,
+      forceCrf: s.forceCrf,
+      crf: s.crf,
+      preset: s.preset,
+      audioBitrateKbps: s.audioBitrateKbps,
+      pixelFormat: s.pixelFormat,
+      parallelWorkers: s.parallelWorkers,
+      tune: s.tune,
+      profile: s.profile,
+      level: s.level
+    });
+  };
+
+  const exportPresetsJSON = () => {
+    const json = JSON.stringify(
+      { version: 1, presets: exportPresetsList.map((p) => ({ name: p.name, settings: p.settings })) },
+      null,
+      2
+    );
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `export-presets-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const importPresetsJSON = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const list: Array<{ name: string; settings: any }> =
+        Array.isArray(data) ? data :
+        Array.isArray(data?.presets) ? data.presets :
+        [];
+      if (!Array.isArray(list) || list.length === 0) {
+        alert("No presets found in JSON.");
+        return;
+      }
+      for (const item of list) {
+        if (!item || typeof item !== "object") continue;
+        const name = typeof item.name === "string" && item.name.trim().length ? item.name : `Imported ${Date.now()}`;
+        const settings = (item.settings && typeof item.settings === "object") ? item.settings : {};
+        addPreset(name, settings);
+      }
+    } catch {
+      alert("Failed to import presets JSON.");
+    } finally {
+      setImportingJSON(false);
+    }
+  };
+
   const applyPreset = (profile: "fast" | "balanced" | "high") => {
     if (profile === "fast") {
       setExportSettings({
@@ -266,13 +333,46 @@ const Exporter: React.FC = () => {
       )}
 
       {exportSettings.engine === "offline" && (
-        <button
-          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
-          onClick={() => setShowPresets((v) => !v)}
-          title="Manage custom encoding presets"
-        >
-          {showPresets ? "Hide Presets" : "Manage Presets"}
-        </button>
+        <>
+          <button
+            className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+            onClick={() => setShowPresets((v) => !v)}
+            title="Manage custom encoding presets"
+          >
+            {showPresets ? "Hide Presets" : "Manage Presets"}
+          </button>
+          <button
+            className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs"
+            onClick={quickSavePreset}
+            title="Quick save current settings as a preset"
+          >
+            Save Preset
+          </button>
+          <button
+            className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+            onClick={exportPresetsJSON}
+            title="Export custom presets to JSON"
+          >
+            Export JSON
+          </button>
+          <label className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs cursor-pointer" title="Import presets from JSON">
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  setImportingJSON(true);
+                  importPresetsJSON(f);
+                  e.currentTarget.value = "";
+                }
+              }}
+            />
+            Import JSON
+          </label>
+          {importingJSON && <span className="text-xs text-gray-400">Importing…</span>}
+        </>
       )}
 
       <select
