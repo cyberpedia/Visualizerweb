@@ -7,6 +7,7 @@ import type { TemplateConfig } from "../state/store";
 type InitMsg = {
   type: "init";
   pcm: ArrayBuffer;
+  timeOffsetSec?: number;
   sampleRate: number;
   fps: number;
   frameCount: number;
@@ -124,8 +125,8 @@ function computeTimeDomainUint8(samples: Float32Array): Uint8Array {
   return out;
 }
 
-function getWindow(pcm: Float32Array, sampleRate: number, tSec: number, N: number): Float32Array {
-  const start = Math.floor(tSec * sampleRate);
+function getWindow(pcm: Float32Array, sampleRate: number, tSec: number, N: number, timeOffsetSec: number = 0): Float32Array {
+  const start = Math.floor((tSec - timeOffsetSec) * sampleRate);
   const out = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const idx = start + i;
@@ -367,6 +368,7 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
   if (data.type !== "init") return;
 
   const { pcm, sampleRate, fps, frameCount, windowSize, width, height, template, track, assets } = data as InitMsg;
+  const timeOffsetSec = (data as InitMsg).timeOffsetSec ?? 0;
   const pcmArr = new Float32Array(pcm);
 
   // Prepare OffscreenCanvas
@@ -470,7 +472,7 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
     }
 
     // analysis
-    const win = getWindow(pcmArr, sampleRate, tSec, windowSize);
+    const win = getWindow(pcmArr, sampleRate, tSec, windowSize, timeOffsetSec);
     const time = computeTimeDomainUint8(win);
     const freq = computeSpectrumUint8(win);
 

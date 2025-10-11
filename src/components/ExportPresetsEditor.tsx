@@ -333,6 +333,7 @@ const ExportPresetsEditor: React.FC = () => {
   const removePreset = usePlayerStore((s) => s.removeExportPreset);
   const renamePreset = usePlayerStore((s) => s.renameExportPreset);
   const updatePresetNotes = usePlayerStore((s) => s.updateExportPresetNotes);
+  const updatePresetCategory = usePlayerStore((s) => s.updateExportPresetCategory);
   const applyPreset = usePlayerStore((s) => s.applyExportPreset);
   const setExportSettings = usePlayerStore((s) => s.setExportSettings);
   const current = usePlayerStore((s) => s.exportSettings);
@@ -341,8 +342,10 @@ const ExportPresetsEditor: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
+  const [newCat, setNewCat] = useState("General");
 
   const categories = ["All", "General", "YouTube", "Instagram", "TikTok", "Twitter", "Streaming", "Mobile"];
+  const assignCategories = ["General", "YouTube", "Instagram", "TikTok", "Twitter", "Streaming", "Mobile", "Custom"];
 
   const filteredBuiltIns = BUILT_IN_PRESETS.filter((bp) => {
     const matchesSearch = bp.name.toLowerCase().includes(search.toLowerCase());
@@ -350,7 +353,11 @@ const ExportPresetsEditor: React.FC = () => {
     return matchesSearch && matchesCategory;
   });
 
-  const filteredCustom = presets.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredCustom = presets.filter((p) => {
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = category === "All" || (p.category ?? "General") === category;
+    return matchesSearch && matchesCategory;
+  });
 
   const isLimited = (s: Partial<ExportSettings>) =>
     s.pixelFormat === "yuv444p" || s.profile === "high444p";
@@ -374,7 +381,7 @@ const ExportPresetsEditor: React.FC = () => {
       level: current.level
     };
     const name = newName.trim() || `Preset ${presets.length + 1}`;
-    addPreset(name, settings);
+    addPreset(name, settings, undefined, newCat);
     setNewName("");
   };
 
@@ -383,12 +390,12 @@ const ExportPresetsEditor: React.FC = () => {
   };
 
   const cloneBuiltIn = (bp: BuiltIn) => {
-    addPreset(`Copy of ${bp.name}`, bp.settings);
+    addPreset(`Copy of ${bp.name}`, bp.settings, undefined, bp.category ?? "General");
   };
 
   const exportJSON = () => {
     const json = JSON.stringify(
-      { version: 1, presets: presets.map((p) => ({ name: p.name, settings: p.settings, notes: p.notes })) },
+      { version: 1, presets: presets.map((p) => ({ name: p.name, settings: p.settings, notes: p.notes, category: p.category })) },
       null,
       2
     );
@@ -406,7 +413,7 @@ const ExportPresetsEditor: React.FC = () => {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const list: Array<{ name: string; settings: Partial<ExportSettings>, notes?: string }> =
+      const list: Array<{ name: string; settings: Partial<ExportSettings>, notes?: string, category?: string }> =
         Array.isArray(data) ? data :
         Array.isArray(data?.presets) ? data.presets :
         [];
@@ -419,7 +426,8 @@ const ExportPresetsEditor: React.FC = () => {
         const name = typeof item.name === "string" && item.name.trim().length ? item.name : `Imported ${Date.now()}`;
         const settings = (item.settings && typeof item.settings === "object") ? item.settings : {};
         const notes = typeof item.notes === "string" ? item.notes : undefined;
-        addPreset(name, settings, notes);
+        const cat = typeof item.category === "string" ? item.category : undefined;
+        addPreset(name, settings, notes, cat);
       }
       setImporting(false);
     } catch {
@@ -491,6 +499,16 @@ const ExportPresetsEditor: React.FC = () => {
           onChange={(e) => setNewName(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs flex-1"
         />
+        <select
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+          value={newCat}
+          onChange={(e) => setNewCat(e.target.value)}
+          title="Preset category"
+        >
+          {assignCategories.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
         <button
           className="px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-xs"
           onClick={saveCurrent}
@@ -530,7 +548,7 @@ const ExportPresetsEditor: React.FC = () => {
                 </button>
                 <button
                   className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
-                  onClick={() => addPreset(`Copy of ${p.name}`, p.settings)}
+                  onClick={() => addPreset(`Copy of ${p.name}`, p.settings, p.notes, p.category)}
                   title="Duplicate preset"
                 >
                   Duplicate
@@ -543,15 +561,25 @@ const ExportPresetsEditor: React.FC = () => {
                   Delete
                 </button>
               </div>
-              <div>
+              <div className="flex items-center gap-2">
                 <input
                   type="text"
                   placeholder="Notes"
                   value={p.notes ?? ""}
                   onChange={(e) => updatePresetNotes(p.id, e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] w-full"
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] flex-1"
                   title="Optional notes for this preset"
                 />
+                <select
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px]"
+                  value={p.category ?? "General"}
+                  onChange={(e) => updatePresetCategory(p.id, e.target.value)}
+                  title="Preset category"
+                >
+                  {assignCategories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
             </li>
           ))}

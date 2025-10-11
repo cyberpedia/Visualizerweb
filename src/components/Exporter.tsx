@@ -48,12 +48,12 @@ const Exporter: React.FC = () => {
       tune: s.tune,
       profile: s.profile,
       level: s.level
-    });
+    }, undefined, "Custom");
   };
 
   const exportPresetsJSON = () => {
     const json = JSON.stringify(
-      { version: 1, presets: exportPresetsList.map((p) => ({ name: p.name, settings: p.settings, notes: p.notes })) },
+      { version: 1, presets: exportPresetsList.map((p) => ({ name: p.name, settings: p.settings, notes: p.notes, category: p.category })) },
       null,
       2
     );
@@ -71,7 +71,7 @@ const Exporter: React.FC = () => {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const list: Array<{ name: string; settings: any, notes?: string }> =
+      const list: Array<{ name: string; settings: any, notes?: string, category?: string }> =
         Array.isArray(data) ? data :
         Array.isArray(data?.presets) ? data.presets :
         [];
@@ -84,7 +84,8 @@ const Exporter: React.FC = () => {
         const name = typeof item.name === "string" && item.name.trim().length ? item.name : `Imported ${Date.now()}`;
         const settings = (item.settings && typeof item.settings === "object") ? item.settings : {};
         const notes = typeof item.notes === "string" ? item.notes : undefined;
-        addPreset(name, settings, notes);
+        const category = typeof item.category === "string" ? item.category : undefined;
+        addPreset(name, settings, notes, category);
       }
     } catch {
       alert("Failed to import presets JSON.");
@@ -313,6 +314,17 @@ const Exporter: React.FC = () => {
       >
         {exportActive ? "Stop Export" : "Export Video"}
       </button>
+      {(() => {
+        const warnings = computeWarnings();
+        return warnings.length > 0 ? (
+          <span
+            className="px-2 py-1 rounded bg-yellow-700 text-yellow-100 text-xs"
+            title={warnings.join("\n")}
+          >
+            ⚠ {warnings.length}
+          </span>
+        ) : null;
+      })()}
 
       <select
         className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
@@ -408,7 +420,7 @@ const Exporter: React.FC = () => {
                 disabled={!selectedPresetId}
                 onClick={() => {
                   const p = exportPresetsList.find((pp) => pp.id === selectedPresetId);
-                  if (p) addPreset(`Copy of ${p.name}`, p.settings);
+                  if (p) addPreset(`Copy of ${p.name}`, p.settings, p.notes, p.category);
                 }}
                 title="Duplicate selected preset"
               >
@@ -419,6 +431,10 @@ const Exporter: React.FC = () => {
                 disabled={!selectedPresetId}
                 onClick={() => {
                   if (selectedPresetId) {
+                    const p = exportPresetsList.find((pp) => pp.id === selectedPresetId);
+                    const name = p?.name ?? "selected preset";
+                    const ok = window.confirm(`Delete "${name}"? This cannot be undone.`);
+                    if (!ok) return;
                     removeExportPresetById(selectedPresetId);
                     setSelectedPresetId("");
                   }

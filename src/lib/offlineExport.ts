@@ -264,18 +264,17 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     }
   }
 
-  // Spawn worker
-  let worker: Worker | null = null;
-  if (decoded) {
-    worker = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
-  }
+  // Worker registry
+  const workers: Worker[] = [];
 
   // Abort handling
   let aborted = false;
   const abort = () => {
     aborted = true;
-    try { worker?.postMessage({ type: "abort" }); } catch {}
-    try { worker?.terminate(); } catch {}
+    for (const w of workers) {
+      try { w.postMessage({ type: "abort" }); } catch {}
+      try { w.terminate(); } catch {}
+    }
   };
   if (signal) {
     const onAbort = () => abort();
@@ -376,10 +375,22 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
 
     const spawn = (range: { start: number; end: number }) => new Promise<void>((resolve, reject) => {
       const w = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
+      workers.push(w);
+
       const seeds = computeSeedsForRange(range.start);
+
+      const timeOffsetSec = range.start / fps;
+      const sampleStart = Math.max(0, Math.floor(timeOffsetSec * decoded.sampleRate));
+      const lastFrameSec = (range.end - 1) / fps;
+      const sampleEnd = Math.min(decoded.pcm.length, Math.floor(lastFrameSec * decoded.sampleRate) + N);
+      const len = Math.max(0, sampleEnd - sampleStart);
+      const segment = new Float32Array(len);
+      segment.set(decoded.pcm.subarray(sampleStart, sampleEnd));
+
       const initMsg = {
         type: "init",
-        pcm: decoded.pcm.buffer, // copied (not transferred) to avoid detaching for other workers
+        pcm: segment.buffer, // transferred, per-range segment to reduce memory duplication
+        timeOffsetSec,
         sampleRate: decoded.sampleRate,
         fps,
         frameCount: totalFrames,
@@ -401,7 +412,8 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
         seedLastBeatT: seeds.seedLastBeatT
       } as any;
 
-      w.postMessage(initMsg); // no transfer list to avoid detaching buffers
+      const transfers: any[] = [segment.buffer, seeds.seedPrevMag.buffer, seeds.seedFluxHist.buffer, seeds.seedBeatIntervals.buffer];
+      w.postMessage(initMsg, transfers);
 
       w.onmessage = (ev: MessageEvent<any>) => {
         const msg = ev.data;
