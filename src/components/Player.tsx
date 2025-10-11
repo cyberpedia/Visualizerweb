@@ -3,7 +3,10 @@ import { audioEngine } from "../lib/audio";
 import { usePlayerStore } from "../state/store";
 
 const Player: React.FC = () => {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRefA = useRef<HTMLAudioElement | null>(null);
+  const audioRefB = useRef<HTMLAudioElement | null>(null);
+  const activeRef = useRef<"A" | "B">("A");
+
   const waveformCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const playlist = usePlayerStore((s) => s.playlist);
   const currentIndex = usePlayerStore((s) => s.currentIndex);
@@ -19,6 +22,8 @@ const Player: React.FC = () => {
   const setPan = usePlayerStore((s) => s.setPan);
   const compressorOn = usePlayerStore((s) => s.compressorOn);
   const setCompressorOn = usePlayerStore((s) => s.setCompressorOn);
+  const limiterOn = usePlayerStore((s) => s.limiterOn);
+  const setLimiterOn = usePlayerStore((s) => s.setLimiterOn);
   const reverbOn = usePlayerStore((s) => s.reverbOn);
   const setReverbOn = usePlayerStore((s) => s.setReverbOn);
   const reverbWet = usePlayerStore((s) => s.reverbWet);
@@ -34,24 +39,27 @@ const Player: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // Initialize audio engine
+  // Initialize audio engine with dual elements
   useEffect(() => {
-    const el = audioRef.current!;
-    audioEngine.attachAudioElement(el);
+    const a = audioRefA.current!;
+    const b = audioRefB.current!;
+    audioEngine.attachAudioElements(a, b);
     setAnalyzer(audioEngine.getAnalyzer());
     audioEngine.setVolume(volume);
     audioEngine.setPlaybackRate(playbackRate);
     audioEngine.setPan(pan);
     audioEngine.setCompressor(compressorOn);
+    audioEngine.setLimiter(limiterOn);
     audioEngine.setReverb(reverbOn);
     audioEngine.setReverbWet(reverbWet);
   }, []);
 
-  // Track change with simple crossfade
+  // Track change with overlapped crossfade
   useEffect(() => {
-    const el = audioRef.current!;
+    const a = audioRefA.current!;
+    const b = audioRefB.current!;
     const track = playlist[currentIndex];
-    if (!el || !track) return;
+    if (!a || !b || !track) return;
 
     // MediaSession metadata
     if ("mediaSession" in navigator) {
@@ -69,37 +77,56 @@ const Player: React.FC = () => {
       } catch {}
     }
 
-    // fade out current audio quickly
-    audioEngine.fadeTo(0.25, 0);
+    const isAActive = activeRef.current === "A";
+    const currentEl = isAActive ? a : b;
+    const nextEl = isAActive ? b : a;
+    const nextWhich = isAActive ? "B" : "A";
 
-    const switchTrack = async () => {
-      el.src = track.url;
-      el.currentTime = 0;
+    const doCrossfade = async () => {
       try {
-        await el.play();
-        setPlaying(true);
+        nextEl.src = track.url;
+        nextEl.currentTime = 0;
+        await nextEl.play();
         audioEngine.resume();
         audioEngine.setPlaybackRate(playbackRate);
         audioEngine.setPan(pan);
         audioEngine.setCompressor(compressorOn);
-        // fade in to target volume
-        audioEngine.fadeTo(0.35, volume);
+        audioEngine.setLimiter(limiterOn);
+
+        // ramp gains
+        audioEngine.rampSourceGain(nextWhich, 0.8, 1);
+        audioEngine.rampSourceGain(isAActive ? "A" : "B", 0.8, 0);
+
+        setPlaying(true);
+
+        // finalize after fade
+        setTimeout(() => {
+          try { currentEl.pause(); } catch {}
+          activeRef.current = nextWhich;
+          audioEngine.setActiveSource(nextWhich);
+        }, 820);
       } catch {
         setPlaying(false);
       }
     };
 
-    // allow fade-out before switching
-    const id = setTimeout(() => switchTrack(), 240);
-    return () => clearTimeout(id);
+    doCrossfade();
   }, [playlist, currentIndex]);
 
   // Playback state
   useEffect(() => {
-    const el = audioRef.current!;
-    if (!el) return;
-    if (playing) el.play().catch(() => {});
-    else el.pause();
+    const a = audioRefA.current!;
+    const b = audioRefB.current!;
+    if (!a || !b) return;
+    if (playing) {
+      // ensure active element is playing
+      const el = activeRef.current === "A" ? a : b;
+      el.play().catch(() => {});
+      audioEngine.resume();
+    } else {
+      a.pause();
+      b.pause();
+    }
   }, [playing]);
 
   // Volume
@@ -117,10 +144,14 @@ const Player: React.FC = () => {
     audioEngine.setPan(pan);
   }, [pan]);
 
-  // Compressor
+  // Compressor & limiter
   useEffect(() => {
     audioEngine.setCompressor(compressorOn);
   }, [compressorOn]);
+
+  useEffect(() => {
+    audioEngine.setLimiter(limiterOn);
+  }, [limiterOn]);
 
   // Reverb
   useEffect(() => {
@@ -136,21 +167,29 @@ const Player: React.FC = () => {
     eqGains.forEach((db, i) => audioEngine.setEqGain(i, db));
   }, [eqGains]);
 
-  // Progress tracking
+  // Progress tracking from both elements
   useEffect(() => {
-    const el = audioRef.current!;
-    if (!el) return;
-    const onTime = () => setProgress(el.currentTime);
-    const onLoaded = () => setDuration(el.duration || 0);
+    const a = audioRefA.current!;
+    const b = audioRefB.current!;
+    if (!a || !b) return;
+
+    const onTime = () => setProgress(audioEngine.getCurrentTime());
+    const onLoaded = () => setDuration(audioEngine.getDuration());
     const onEnded = () => next();
 
-    el.addEventListener("timeupdate", onTime);
-    el.addEventListener("loadedmetadata", onLoaded);
-    el.addEventListener("ended", onEnded);
+    a.addEventListener("timeupdate", onTime);
+    b.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onLoaded);
+    b.addEventListener("loadedmetadata", onLoaded);
+    a.addEventListener("ended", onEnded);
+    b.addEventListener("ended", onEnded);
     return () => {
-      el.removeEventListener("timeupdate", onTime);
-      el.removeEventListener("loadedmetadata", onLoaded);
-      el.removeEventListener("ended", onEnded);
+      a.removeEventListener("timeupdate", onTime);
+      b.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onLoaded);
+      b.removeEventListener("loadedmetadata", onLoaded);
+      a.removeEventListener("ended", onEnded);
+      b.removeEventListener("ended", onEnded);
     };
   }, [next]);
 
@@ -182,16 +221,61 @@ const Player: React.FC = () => {
   };
 
   const onSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const el = audioRef.current!;
+    const a = audioRefA.current!;
+    const b = audioRefB.current!;
+    const el = activeRef.current === "A" ? a : b;
     if (!el || !duration) return;
     const v = Number(e.target.value);
     el.currentTime = v;
     setProgress(v);
   };
 
+  // Touch gesture seek on waveform canvas
+  useEffect(() => {
+    const c = waveformCanvasRef.current!;
+    if (!c) return;
+    let touching = false;
+
+    const onTouchStart = (ev: TouchEvent) => {
+      touching = true;
+      const rect = c.getBoundingClientRect();
+      const x = ev.touches[0].clientX - rect.left;
+      const ratio = Math.min(1, Math.max(0, x / rect.width));
+      const a = audioRefA.current!;
+      const b = audioRefB.current!;
+      const el = activeRef.current === "A" ? a : b;
+      if (!el || !isFinite(el.duration)) return;
+      el.currentTime = ratio * el.duration;
+      setProgress(el.currentTime);
+    };
+    const onTouchMove = (ev: TouchEvent) => {
+      if (!touching) return;
+      const rect = c.getBoundingClientRect();
+      const x = ev.touches[0].clientX - rect.left;
+      const ratio = Math.min(1, Math.max(0, x / rect.width));
+      const a = audioRefA.current!;
+      const b = audioRefB.current!;
+      const el = activeRef.current === "A" ? a : b;
+      if (!el || !isFinite(el.duration)) return;
+      el.currentTime = ratio * el.duration;
+      setProgress(el.currentTime);
+    };
+    const onTouchEnd = () => { touching = false; };
+
+    c.addEventListener("touchstart", onTouchStart);
+    c.addEventListener("touchmove", onTouchMove);
+    c.addEventListener("touchend", onTouchEnd);
+    return () => {
+      c.removeEventListener("touchstart", onTouchStart);
+      c.removeEventListener("touchmove", onTouchMove);
+      c.removeEventListener("touchend", onTouchEnd);
+    };
+  }, []);
+
   return (
     <div className="border-t border-gray-800 bg-gray-900/60 px-3 py-2">
-      <audio ref={audioRef} crossOrigin="anonymous" />
+      <audio ref={audioRefA} crossOrigin="anonymous" />
+      <audio ref={audioRefB} crossOrigin="anonymous" />
       <div className="flex items-center gap-3">
         <button
           className="px-3 py-1 rounded bg-brand-600 hover:bg-brand-500 active:scale-[0.98]"
@@ -276,6 +360,15 @@ const Player: React.FC = () => {
             onChange={(e) => setCompressorOn(e.target.checked)}
           />
           Compressor
+        </label>
+
+        <label className="flex items-center gap-1 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            checked={limiterOn}
+            onChange={(e) => setLimiterOn(e.target.checked)}
+          />
+          Limiter
         </label>
 
         <label className="flex items-center gap-1 text-xs text-gray-300">

@@ -206,6 +206,8 @@ const LayerEditor: React.FC = () => {
                 >
                   <option value="source-over">source-over</option>
                   <option value="lighter">lighter (add)</option>
+                  <option value="multiply">multiply</option>
+                  <option value="screen">screen</option>
                 </select>
               </label>
               <label className="text-xs">

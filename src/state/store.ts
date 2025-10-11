@@ -180,6 +180,7 @@ type PlayerState = {
   playbackRate: number; // 0.5..2
   pan: number; // -1..1
   compressorOn: boolean;
+  limiterOn: boolean;
   reverbOn: boolean;
   reverbWet: number; // 0..1
   eqGains: number[]; // length 10
@@ -207,6 +208,7 @@ type PlayerState = {
   setPlaybackRate: (r: number) => void;
   setPan: (p: number) => void;
   setCompressorOn: (on: boolean) => void;
+  setLimiterOn: (on: boolean) => void;
   setEqGain: (band: number, db: number) => void;
   setAnalyzer: (an: AnalyserNode | null) => void;
   setTemplate: (t: Partial<TemplateConfig>) => void;
@@ -478,9 +480,11 @@ export const usePlayerStore = create<PlayerState>()(
         playbackRate: s.playbackRate,
         pan: s.pan,
         compressorOn: s.compressorOn,
+        limiterOn: s.limiterOn,
         reverbOn: s.reverbOn,
         reverbWet: s.reverbWet,
-        eqGains: s.eqGains,
+        eqGains: s.eqGa_codeinnews</,
+
         visualizerTemplate: s.visualizerTemplate,
         exportSettings: s.exportSettings,
         exportPresets: s.exportPresets,

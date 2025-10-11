@@ -5,11 +5,21 @@ export type EqBand = {
 
 export class AudioEngine {
   ctx: AudioContext | null = null;
-  audioEl: HTMLAudioElement | null = null;
-  source: MediaElementAudioSourceNode | null = null;
+
+  // Dual audio elements for overlapped crossfade
+  audioElA: HTMLAudioElement | null = null;
+  audioElB: HTMLAudioElement | null = null;
+  sourceA: MediaElementAudioSourceNode | null = null;
+  sourceB: MediaElementAudioSourceNode | null = null;
+  sourceGainA: GainNode | null = null;
+  sourceGainB: GainNode | null = null;
+  activeSource: "A" | "B" = "A";
+
+  // Processing chain
   gainNode: GainNode | null = null;
   eqNodes: BiquadFilterNode[] = [];
   compressor: DynamicsCompressorNode | null = null;
+  limiter: DynamicsCompressorNode | null = null;
   panner: StereoPannerNode | null = null;
   convolver: ConvolverNode | null = null;
   wetGain: GainNode | null = null;
@@ -38,20 +48,23 @@ export class AudioEngine {
     return buf;
   }
 
-  attachAudioElement(audioEl: HTMLAudioElement) {
-    this.audioEl = audioEl;
+  attachAudioElements(a: HTMLAudioElement, b: HTMLAudioElement) {
+    this.audioElA = a;
+    this.audioElB = b;
     const ctx = this.ensureCtx();
 
-    if (this.source) {
-      try {
-        this.source.disconnect();
-      } catch {}
-      this.source = null;
+    // disconnect previous
+    for (const s of [this.sourceA, this.sourceB]) {
+      try { s?.disconnect(); } catch {}
     }
-    this.source = ctx.createMediaElementSource(audioEl);
+    this.sourceA = ctx.createMediaElementSource(a);
+    this.sourceB = ctx.createMediaElementSource(b);
+    this.sourceGainA = ctx.createGain();
+    this.sourceGainB = ctx.createGain();
+    this.sourceGainA.gain.value = 1.0;
+    this.sourceGainB.gain.value = 0.0;
 
     // setup chain
-    this.gainNode = ctx.createGain();
     this.eqNodes = this.createEqNodes();
     this.compressor = ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -10;
@@ -59,6 +72,13 @@ export class AudioEngine {
     this.compressor.ratio.value = 3;
     this.compressor.attack.value = 0.003;
     this.compressor.release.value = 0.25;
+
+    this.limiter = ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -2;
+    this.limiter.knee.value = 0;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.001;
+    this.limiter.release.value = 0.05;
 
     this.panner = ctx.createStereoPanner();
     this.panner.pan.value = 0;
@@ -76,8 +96,14 @@ export class AudioEngine {
 
     this.streamDest = ctx.createMediaStreamDestination();
 
-    // connect source -> eq -> compressor -> panner
-    let node: AudioNode = this.source;
+    // Merge sources -> preGain -> EQ -> compressor -> panner
+    const preGain = ctx.createGain();
+    this.sourceA.connect(this.sourceGainA!);
+    this.sourceB.connect(this.sourceGainB!);
+    this.sourceGainA!.connect(preGain);
+    this.sourceGainB!.connect(preGain);
+
+    let node: AudioNode = preGain;
     for (const eq of this.eqNodes) {
       node.connect(eq);
       node = eq;
@@ -92,14 +118,14 @@ export class AudioEngine {
     node.connect(this.convolver!);
     this.convolver!.connect(this.wetGain!);
 
-    // mix wet + dry -> gain -> outputs
+    // mix wet + dry -> limiter -> gain -> outputs
     const mixGain = ctx.createGain();
     this.dryGain!.connect(mixGain);
     this.wetGain!.connect(mixGain);
 
-    // global gain
-    this.gainNode = this.gainNode || ctx.createGain();
-    mixGain.connect(this.gainNode);
+    this.gainNode = ctx.createGain();
+    mixGain.connect(this.limiter!);
+    this.limiter!.connect(this.gainNode);
 
     // tee to destination, analyzer, and streamDest
     this.gainNode.connect(ctx.destination);
@@ -118,8 +144,9 @@ export class AudioEngine {
   }
 
   setPlaybackRate(r: number) {
-    if (!this.audioEl) return;
-    this.audioEl.playbackRate = Math.min(2, Math.max(0.5, r));
+    const val = Math.min(2, Math.max(0.5, r));
+    if (this.audioElA) this.audioElA.playbackRate = val;
+    if (this.audioElB) this.audioElB.playbackRate = val;
   }
 
   setPan(p: number) {
@@ -128,7 +155,6 @@ export class AudioEngine {
   }
 
   setCompressor(on: boolean) {
-    // Always in chain; if off, relax ratio/threshold minimally
     if (!this.compressor) return;
     if (on) {
       this.compressor.threshold.value = -10;
@@ -145,10 +171,27 @@ export class AudioEngine {
     }
   }
 
+  setLimiter(on: boolean) {
+    if (!this.limiter) return;
+    if (on) {
+      this.limiter.threshold.value = -2;
+      this.limiter.knee.value = 0;
+      this.limiter.ratio.value = 20;
+      this.limiter.attack.value = 0.001;
+      this.limiter.release.value = 0.05;
+    } else {
+      this.limiter.threshold.value = 0;
+      this.limiter.knee.value = 0;
+      this.limiter.ratio.value = 1;
+      this.limiter.attack.value = 0.001;
+      this.limiter.release.value = 0.05;
+    }
+  }
+
   setReverb(on: boolean) {
     if (!this.wetGain || !this.dryGain) return;
     this.wetGain.gain.value = on ? (this.wetGain.gain.value || 0.25) : 0.0;
-    this.dryGain.gain.value = on ? 1.0 : 1.0; // keep dry path; wet controls mix
+    this.dryGain.gain.value = 1.0;
   }
 
   setReverbWet(value: number) {
@@ -175,6 +218,29 @@ export class AudioEngine {
     node.gain.value = db;
   }
 
+  setSourceGain(which: "A" | "B", value: number) {
+    const g = which === "A" ? this.sourceGainA : this.sourceGainB;
+    if (!g) return;
+    g.gain.value = Math.min(1, Math.max(0, value));
+  }
+
+  rampSourceGain(which: "A" | "B", seconds: number, target: number) {
+    const ctx = this.ensureCtx();
+    const g = which === "A" ? this.sourceGainA : this.sourceGainB;
+    if (!g) return;
+    const now = ctx.currentTime;
+    const clamped = Math.min(1, Math.max(0, target));
+    try {
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(g.gain.value, now);
+      g.gain.linearRampToValueAtTime(clamped, now + Math.max(0.01, seconds));
+    } catch {}
+  }
+
+  setActiveSource(which: "A" | "B") {
+    this.activeSource = which;
+  }
+
   getAnalyzer() {
     return this.analyzer!;
   }
@@ -195,11 +261,13 @@ export class AudioEngine {
   }
 
   getCurrentTime(): number {
-    return this.audioEl?.currentTime ?? 0;
+    const el = this.activeSource === "A" ? this.audioElA : this.audioElB;
+    return el?.currentTime ?? 0;
   }
 
   getDuration(): number {
-    return this.audioEl?.duration ?? 0;
+    const el = this.activeSource === "A" ? this.audioElA : this.audioElB;
+    return el?.duration ?? 0;
   }
 
   createEqNodes() {

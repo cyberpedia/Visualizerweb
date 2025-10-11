@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { usePlayerStore } from "../state/store";
 
 const Playlist: React.FC = () => {
@@ -11,6 +11,9 @@ const Playlist: React.FC = () => {
   const moveDown = usePlayerStore((s) => s.moveTrackDown);
   const addUrlTrack = usePlayerStore((s) => s.addUrlTrack);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [ctxMenu, setCtxMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [pressTimer, setPressTimer] = useState<number | null>(null);
 
   const exportM3U = () => {
     const lines: string[] = ["#EXTM3U"];
@@ -50,7 +53,7 @@ const Playlist: React.FC = () => {
   };
 
   return (
-    <div className="p-3">
+    <div className="p-3 relative">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold">Playlist</h2>
         <div className="flex items-center gap-2">
@@ -98,6 +101,24 @@ const Playlist: React.FC = () => {
                 i === currentIndex ? "bg-brand-700/40" : "hover:bg-gray-800/60"
               }`}
               onClick={() => setCurrentIndex(i)}
+              onTouchStart={(e) => {
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const timer = window.setTimeout(() => {
+                  setCtxMenu({ id: t.id, x: rect.left + rect.width - 8, y: rect.top + 8 });
+                }, 500);
+                setPressTimer(timer);
+              }}
+              onTouchEnd={() => {
+                if (pressTimer) {
+                  clearTimeout(pressTimer);
+                  setPressTimer(null);
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setCtxMenu({ id: t.id, x: e.clientX || rect.left + rect.width - 8, y: e.clientY || rect.top + 8 });
+              }}
             >
               <div className="truncate">
                 <div className="text-sm truncate">{t.name}</div>
@@ -140,6 +161,42 @@ const Playlist: React.FC = () => {
           ))}
         </ul>
       </div>
+
+      {ctxMenu && (
+        <div
+          className="absolute z-50 bg-gray-900 border border-gray-800 rounded shadow-md text-xs"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onMouseLeave={() => setCtxMenu(null)}
+        >
+          <button
+            className="block w-full text-left px-3 py-2 hover:bg-gray-800"
+            onClick={() => {
+              moveUp(ctxMenu.id);
+              setCtxMenu(null);
+            }}
+          >
+            Move Up
+          </button>
+          <button
+            className="block w-full text-left px-3 py-2 hover:bg-gray-800"
+            onClick={() => {
+              moveDown(ctxMenu.id);
+              setCtxMenu(null);
+            }}
+          >
+            Move Down
+          </button>
+          <button
+            className="block w-full text-left px-3 py-2 hover:bg-gray-800 text-red-400"
+            onClick={() => {
+              removeTrack(ctxMenu.id);
+              setCtxMenu(null);
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
     </div>
   );
 };
