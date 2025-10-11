@@ -130,11 +130,13 @@ export type ExportSettings = {
   bitrate: number; // bits per second (used when CRF unset)
   engine?: "realtime" | "offline"; // realtime MediaRecorder(WebM) or offline ffmpeg.wasm(MP4)
   // Encoding options (offline engine)
+  forceCrf?: boolean;
   crf?: number; // 0..51, lower = higher quality
   preset?: "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium" | "slow";
   audioBitrateKbps?: number; // e.g., 192
   pixelFormat?: "yuv420p" | "yuv444p";
   parallelWorkers?: number; // number of workers for offline render (1..4)
+  encodeProfile?: "fast" | "balanced" | "high";
 };
 
 type PlayerState = {
@@ -209,10 +211,10 @@ const DEFAULT_EXPORT: ExportSettings = {
   fps: 30,
   bitrate: 4_000_000,
   engine: "realtime",
+  forceCrf: false,
   crf: 23,
   preset: "veryfast",
-  audioBitrateKbps: 192,
-  pixelFormat: "yuv420p",
+  audioBitrateKrmat: "yuv420p",
   parallelWorkers: 2
 };
 

@@ -313,8 +313,67 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
 
     let framesCaptured = 0;
 
+    const computeSeedsForRange = (startFrame: number) => {
+      const SEED_HISTORY = 60;
+      const half = N >> 1;
+      const prevMag = new Float32Array(half);
+      const fluxHist: number[] = [];
+      const beatIntervals: number[] = [];
+      let lastBeatT = 0;
+
+      const startIdx = Math.max(0, startFrame - (SEED_HISTORY + 1));
+      let prev: Uint8Array | null = null;
+      for (let fIdx = startIdx; fIdx < startFrame; fIdx++) {
+        const tSec = fIdx / fps;
+        const win = getWindow(decoded.pcm, decoded.sampleRate, tSec, N);
+        const cur = computeSpectrumUint8(win);
+        if (fIdx === startFrame - 1) {
+          // seed previous magnitudes with last pre-range frame
+          for (let i = 0; i < half; i++) prevMag[i] = cur[i];
+        }
+        if (prev) {
+          let flux = 0;
+          for (let i = 0; i < cur.length; i++) {
+            const diff = cur[i] - prev[i];
+            if (diff > 0) flux += diff;
+          }
+          fluxHist.push(flux);
+        }
+        prev = cur;
+      }
+
+      if (fluxHist.length) {
+        const mean = fluxHist.reduce((a, b) => a + b, 0) / fluxHist.length;
+        const variance = fluxHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / fluxHist.length;
+        const std = Math.sqrt(variance);
+        const threshold = mean + 1.8 * std;
+        const minInterval = 0.25;
+        let lastT = (startIdx + 1) / fps;
+        for (let i = 0; i < fluxHist.length; i++) {
+          const t = (startIdx + 1 + i) / fps;
+          const flux = fluxHist[i];
+          if (flux > threshold && t - lastBeatT > minInterval) {
+            if (lastBeatT > 0) {
+              beatIntervals.push(t - lastBeatT);
+              if (beatIntervals.length > 12) beatIntervals.shift();
+            }
+            lastBeatT = t;
+          }
+          lastT = t;
+        }
+      }
+
+      return {
+        seedPrevMag: prevMag,
+        seedFluxHist: new Float32Array(fluxHist),
+        seedBeatIntervals: new Float32Array(beatIntervals),
+        seedLastBeatT: lastBeatT
+      };
+    };
+
     const spawn = (range: { start: number; end: number }) => new Promise<void>((resolve, reject) => {
       const w = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
+      const seeds = computeSeedsForRange(range.start);
       const initMsg = {
         type: "init",
         pcm: decoded.pcm.buffer, // copied (not transferred) to avoid detaching for other workers
@@ -332,7 +391,11 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
           layers: layerBytes.length ? layerBytes : undefined
         },
         rangeStart: range.start,
-        rangeEnd: range.end
+        rangeEnd: range.end,
+        seedPrevMag: seeds.seedPrevMag.buffer,
+        seedFluxHist: seeds.seedFluxHist.buffer,
+        seedBeatIntervals: seeds.seedBeatIntervals.buffer,
+        seedLastBeatT: seeds.seedLastBeatT
       } as any;
 
       w.postMessage(initMsg); // no transfer list to avoid detaching buffers

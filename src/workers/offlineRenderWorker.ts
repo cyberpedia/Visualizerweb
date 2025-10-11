@@ -22,6 +22,10 @@ type InitMsg = {
   };
   rangeStart?: number;
   rangeEnd?: number;
+  seedPrevMag?: ArrayBuffer;
+  seedFluxHist?: ArrayBuffer;
+  seedLastBeatT?: number;
+  seedBeatIntervals?: ArrayBuffer;
 };
 type AbortMsg = { type: "abort" };
 
@@ -414,12 +418,39 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
     }
   }
 
-  // Beat detection state
+  // Beat detection state (seeded for continuity across ranges)
   const prevMag = new Float32Array(windowSize >> 1);
   const fluxHist: number[] = [];
   const beatIntervals: number[] = [];
   let lastBeatT = 0;
   let pulse = 0;
+
+  // Seeds
+  try {
+    const seedPrev = (data as InitMsg).seedPrevMag;
+    if (seedPrev) {
+      const f = new Float32Array(seedPrev);
+      for (let i = 0; i < Math.min(prevMag.length, f.length); i++) prevMag[i] = f[i];
+    }
+  } catch {}
+  try {
+    const seedFlux = (data as InitMsg).seedFluxHist;
+    if (seedFlux) {
+      const fh = new Float32Array(seedFlux);
+      for (let i = 0; i < fh.length; i++) fluxHist.push(fh[i]);
+    }
+  } catch {}
+  try {
+    const seedIntervals = (data as InitMsg).seedBeatIntervals;
+    if (seedIntervals) {
+      const bi = new Float32Array(seedIntervals);
+      for (let i = 0; i < bi.length; i++) beatIntervals.push(bi[i]);
+    }
+  } catch {}
+  try {
+    const seedLast = (data as InitMsg).seedLastBeatT;
+    if (typeof seedLast === "number") lastBeatT = seedLast;
+  } catch {}
 
   const rangeStart = (data as InitMsg).rangeStart ?? 0;
   const rangeEnd = (data as InitMsg).rangeEnd ?? frameCount;

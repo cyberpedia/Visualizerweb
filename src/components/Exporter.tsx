@@ -18,6 +18,41 @@ const Exporter: React.FC = () => {
   const [offlineProgress, setOfflineProgress] = useState<{ p: number; phase: "capture" | "encode" | null }>({ p: 0, phase: null });
   const abortCtrlRef = useRef<AbortController | null>(null);
 
+  const applyPreset = (profile: "fast" | "balanced" | "high") => {
+    if (profile === "fast") {
+      setExportSettings({
+        encodeProfile: "fast",
+        preset: "veryfast",
+        forceCrf: false,
+        crf: 24,
+        bitrate: 6_000_000,
+        audioBitrateKbps: 160,
+        pixelFormat: "yuv420p",
+        parallelWorkers: 3
+      });
+    } else if (profile === "balanced") {
+      setExportSettings({
+        encodeProfile: "balanced",
+        preset: "fast",
+        forceCrf: true,
+        crf: 22,
+        audioBitrateKbps: 192,
+        pixelFormat: "yuv420p",
+        parallelWorkers: 2
+      });
+    } else {
+      setExportSettings({
+        encodeProfile: "high",
+        preset: "slow",
+        forceCrf: true,
+        crf: 18,
+        audioBitrateKbps: 320,
+        pixelFormat: "yuv444p",
+        parallelWorkers: 1
+      });
+    }
+  };
+
   useEffect(() => {
     if (!exportActive) return;
 
@@ -48,7 +83,7 @@ const Exporter: React.FC = () => {
             onProgress: (p, phase) => setOfflineProgress({ p, phase }),
             signal: abortCtrlRef.current.signal,
             encode: {
-              crf: exportSettings.crf,
+              crf: exportSettings.forceCrf ? exportSettings.crf : undefined,
               preset: exportSettings.preset,
               audioBitrateKbps: exportSettings.audioBitrateKbps,
               pixelFormat: exportSettings.pixelFormat,
@@ -173,6 +208,19 @@ const Exporter: React.FC = () => {
         <option value="offline">Offline (MP4)</option>
       </select>
 
+      {exportSettings.engine === "offline" && (
+        <select
+          className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+          value={exportSettings.encodeProfile ?? "balanced"}
+          onChange={(e) => applyPreset(e.target.value as any)}
+          title="Export preset"
+        >
+          <option value="fast">Fast</option>
+          <option value="balanced">Balanced</option>
+          <option value="high">High Quality</option>
+        </select>
+      )}
+
       <select
         className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
         value={exportSettings.mode}
@@ -210,16 +258,26 @@ const Exporter: React.FC = () => {
         <option value={30}>30 fps</option>
         <option value={60}>60 fps</option>
       </select>
-      <input
-        type="number"
-        value={exportSettings.bitrate}
-        onChange={(e) => setExportSettings({ bitrate: Number(e.target.value) })}
-        className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-28"
-        title="Bits per second"
-      />
+      {!(exportSettings.engine === "offline" && exportSettings.forceCrf) && (
+        <input
+          type="number"
+          value={exportSettings.bitrate}
+          onChange={(e) => setExportSettings({ bitrate: Number(e.target.value) })}
+          className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-28"
+          title="Bits per second"
+        />
+      )}
 
       {exportSettings.engine === "offline" && (
         <>
+          <label className="flex items-center gap-1 text-xs text-gray-300">
+            <input
+              type="checkbox"
+              checked={!!exportSettings.forceCrf}
+              onChange={(e) => setExportSettings({ forceCrf: e.target.checked })}
+            />
+            Use CRF
+          </label>
           <select
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
             value={exportSettings.preset ?? "veryfast"}
