@@ -226,6 +226,21 @@ function lerpColor(a: string, b: string, t: number) {
   return `rgb(${r}, ${g}, ${bl})`;
 }
 
+function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: number, y: number) {
+  ctx.globalCompositeOperation = (layer.blendMode as any) || "source-over";
+  (ctx as any).shadowBlur = layer.shadowBlur || 0;
+  (ctx as any).shadowColor = layer.shadowColor || "transparent";
+  const rot = (layer.rotation || 0) * Math.PI / 180;
+  const sx = layer.scaleX ?? 1;
+  const sy = layer.scaleY ?? 1;
+  const ax = layer.anchorX ?? 0;
+  const ay = layer.anchorY ?? 0;
+  ctx.translate(x + ax, y + ay);
+  if (rot) ctx.rotate(rot);
+  if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+  ctx.translate(-(x + ax), -(y + ay));
+}
+
 function drawWorkerLayers(
   ctx: OffscreenCanvasRenderingContext2D,
   width: number,
@@ -248,9 +263,15 @@ function drawWorkerLayers(
         const size = interpKF(l.kf?.size, time, l.size);
         ctx.save();
         ctx.globalAlpha = opacity;
+        applyCommon(ctx, l, x, y);
         ctx.fillStyle = l.color;
         ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
         ctx.textAlign = l.align as CanvasTextAlign;
+        if (l.strokeColor && l.strokeWidth) {
+          (ctx as any).lineWidth = l.strokeWidth;
+          (ctx as any).strokeStyle = l.strokeColor;
+          (ctx as any).strokeText(l.text, x, y);
+        }
         ctx.fillText(l.text, x, y);
         ctx.restore();
         break;
@@ -267,6 +288,7 @@ function drawWorkerLayers(
         const h = l.height ?? size;
         ctx.save();
         ctx.globalAlpha = opacity;
+        applyCommon(ctx, l, x, y);
         if (l.clipCircle) {
           ctx.beginPath();
           ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
@@ -284,16 +306,25 @@ function drawWorkerLayers(
         const opacity = interpKF(l.kf?.opacity, time, l.opacity);
         ctx.save();
         ctx.globalAlpha = opacity;
+        applyCommon(ctx, l, x, y);
         if (l.shape === "rect") {
           const w = l.width ?? 100;
           const h = l.height ?? 50;
-          if (l.fillColor) {
+          if (l.fillGradient && (l.fillGradient.from && l.fillGradient.to)) {
+            const grad = l.fillGradient.horizontal
+              ? ctx.createLinearGradient(x, y, x + w, y)
+              : ctx.createLinearGradient(x, y, x, y + h);
+            grad.addColorStop(0, l.fillGradient.from);
+            grad.addColorStop(1, l.fillGradient.to);
+            ctx.fillStyle = grad;
+            ctx.fillRect(x, y, w, h);
+          } else if (l.fillColor) {
             ctx.fillStyle = l.fillColor;
             ctx.fillRect(x, y, w, h);
           }
           if (l.strokeColor && l.strokeWidth) {
             ctx.strokeStyle = l.strokeColor;
-            ctx.lineWidth = l.strokeWidth;
+            (ctx as any).lineWidth = l.strokeWidth;
             ctx.strokeRect(x, y, w, h);
           }
         } else if (l.shape === "circle") {
@@ -307,7 +338,7 @@ function drawWorkerLayers(
           }
           if (l.strokeColor && l.strokeWidth) {
             ctx.strokeStyle = l.strokeColor;
-            ctx.lineWidth = l.strokeWidth;
+            (ctx as any).lineWidth = l.strokeWidth;
             ctx.stroke();
           }
         }
@@ -325,6 +356,7 @@ function drawWorkerLayers(
         const endAngle = -Math.PI / 2 + t * Math.PI * 2;
         ctx.save();
         ctx.globalAlpha = opacity;
+        applyCommon(ctx, l, x, y);
         ctx.lineWidth = thick;
         ctx.strokeStyle = lerpColor(l.color1, l.color2, t);
         ctx.beginPath();
@@ -338,6 +370,7 @@ function drawWorkerLayers(
         const l: any = layer;
         ctx.save();
         ctx.globalAlpha = l.opacity;
+        applyCommon(ctx, l, 0, 0);
         ctx.fillStyle = l.color;
         const count = l.count;
         const speed = l.speed * (1 + 0.5 * (beatPulse || 0));

@@ -142,6 +142,10 @@ const Exporter: React.FC = () => {
     })();
     const levelNum = exportSettings.level ? parseFloat(exportSettings.level) : NaN;
 
+    if (exportSettings.outputType === "audio" && exportSettings.engine === "realtime") {
+      out.push("Audio-only export is only available in Offline (MP4/M4A). Switch engine to Offline.");
+    }
+
     if (exportSettings.pixelFormat === "yuv444p") {
       out.push("yuv444p has limited hardware decoder support. Use yuv420p for widest compatibility.");
       if (exportSettings.profile && exportSettings.profile !== "high444p") {
@@ -161,6 +165,10 @@ const Exporter: React.FC = () => {
 
     if (!exportSettings.forceCrf && (exportSettings.preset === "ultrafast" || exportSettings.preset === "superfast")) {
       out.push("Bitrate with ultrafast/superfast preset may produce lower visual quality. Consider CRF or a slower preset.");
+    }
+
+    if (exportSettings.videoCodec && exportSettings.videoCodec !== "libx264") {
+      out.push("Selected codec may not be available in the current ffmpeg.wasm build. If export fails, switch to H.264 (libx264).");
     }
 
     return out;
@@ -193,6 +201,7 @@ const Exporter: React.FC = () => {
             bitrate: exportSettings.bitrate || 4_000_000,
             track: currentTrack,
             template,
+            outputType: exportSettings.outputType,
             onProgress: (p, phase) => setOfflineProgress({ p, phase }),
             signal: abortCtrlRef.current.signal,
             encode: {
@@ -200,7 +209,7 @@ const Exporter: React.FC = () => {
               preset: exportSettings.preset,
               audioBitrateKbps: exportSettings.audioBitrateKbps,
               pixelFormat: exportSettings.pixelFormat,
-              videoCodec: "libx264",
+              videoCodec: exportSettings.videoCodec,
               profile: exportSettings.profile,
               level: exportSettings.level,
               tune: exportSettings.tune
@@ -312,7 +321,7 @@ const Exporter: React.FC = () => {
         onClick={toggleExport}
         title={!playing ? "Start playback to enable export" : ""}
       >
-        {exportActive ? "Stop Export" : "Export Video"}
+        {exportActive ? "Stop Export" : (exportSettings.outputType === "audio" ? "Export Audio" : "Export Video")}
       </button>
       {(() => {
         const warnings = computeWarnings();
@@ -334,6 +343,15 @@ const Exporter: React.FC = () => {
       >
         <option value="realtime">Realtime (WebM)</option>
         <option value="offline">Offline (MP4)</option>
+      </select>
+      <select
+        className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+        value={exportSettings.outputType ?? "video"}
+        onChange={(e) => setExportSettings({ outputType: e.target.value as any })}
+        title="Output type"
+      >
+        <option value="video">Video + Audio</option>
+        <option value="audio">Audio Only (Offline)</option>
       </select>
       <button
         className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
@@ -543,7 +561,7 @@ const Exporter: React.FC = () => {
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
             value={exportSettings.preset ?? "veryfast"}
             onChange={(e) => setExportSettings({ preset: e.target.value as any })}
-            title="x264 preset"
+            title="Encoder preset"
           >
             <option value="ultrafast">ultrafast</option>
             <option value="superfast">superfast</option>
@@ -552,6 +570,16 @@ const Exporter: React.FC = () => {
             <option value="fast">fast</option>
             <option value="medium">medium</option>
             <option value="slow">slow</option>
+          </select>
+          <select
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+            value={exportSettings.videoCodec ?? "libx264"}
+            onChange={(e) => setExportSettings({ videoCodec: e.target.value as any })}
+            title="Video codec"
+          >
+            <option value="libx264">H.264 (libx264)</option>
+            <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+            <option value="libx265">HEVC (libx265)</option>
           </select>
           <input
             type="number"

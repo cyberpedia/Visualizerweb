@@ -1,5 +1,10 @@
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
 import { Track, TemplateConfig } from "../state/store";
+import BarSpectrum from "./visualizers/BarSpectrum";
+import CircleSpectrum from "./visualizers/CircleSpectrum";
+import Waveform from "./visualizers/Waveform";
+import { drawOverlays } from "./overlay";
+import { drawLayers } from "./layers";
 
 /**
  * Locked-step offline export:
@@ -16,6 +21,7 @@ export type OfflineExportOptions = {
   bitrate: number;
   track: Track | null;
   template: TemplateConfig;
+  outputType?: "video" | "audio";
   onProgress?: (p: number, phase: "capture" | "encode") => void;
   signal?: AbortSignal;
   encode?: {
@@ -23,7 +29,7 @@ export type OfflineExportOptions = {
     preset?: "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium" | "slow";
     audioBitrateKbps?: number;
     pixelFormat?: "yuv420p" | "yuv444p";
-    videoCodec?: "libx264";
+    videoCodec?: "libx264" | "libvpx-vp9" | "libx265";
     tune?: "film" | "animation" | "grain" | "stillimage" | "psnr" | "ssim" | "fastdecode" | "zerolatency";
     profile?: "baseline" | "main" | "high" | "high444p";
     level?: "3.0" | "3.1" | "4.0" | "4.1" | "5.0" | "5.1" | "5.2";
@@ -167,6 +173,39 @@ function getWindow(pcm: Float32Array, sampleRate: number, tSec: number, N: numbe
   return out;
 }
 
+function interpKF(kf: any[] | undefined, t: number, base: number): number {
+  if (!kf || kf.length === 0) return base;
+  const sorted = kf.slice().sort((a, b) => a.time - b.time);
+  if (t <= sorted[0].time) return sorted[0].value;
+  if (t >= sorted[sorted.length - 1].time) return sorted[sorted.length - 1].value;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    if (t >= a.time && t <= b.time) {
+      const tt = (t - a.time) / (b.time - a.time);
+      const ease = a.easing ?? "linear";
+      const e =
+        ease === "easeIn" ? tt * tt :
+        ease === "easeOut" ? tt * (2 - tt) :
+        ease === "easeInOut" ? (tt < 0.5 ? 2 * tt * tt : -1 + (4 - 2 * tt) * tt) :
+        tt;
+      return a.value + (b.value - a.value) * e;
+    }
+  }
+  return base;
+}
+
+function lerpColor(a: string, b: string, t: number) {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ar = (pa >> 16) & 0xff, ag = (pa >> 8) & 0xff, ab = pa & 0xff;
+  const br = (pb >> 16) & 0xff, bg = (pb >> 8) & 0xff, bb = pb & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
 // ---------- Rendering ----------
 async function toPNGBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -290,6 +329,329 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       const bg = template.background ?? "#0b1020";
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, width, height);
+      const blob: Blob = await new Promise((resolve) => (canvas as HTMLCanvasElement).toBlob((b) => resolve(b!), "image/png"));
+      const ab = await blob.arrayBuffer();
+      ffmpeg.FS("writeFile", name, new Uint8Array(ab));
+      if (onProgress) onProgress(i / frameCount, "capture");
+    }
+  } else if (template.backgroundVideoUrl) {
+    // Main-thread deterministic rendering with background video frames
+    const video = document.createElement("video");
+    video.src = template.backgroundVideoUrl!;
+    video.muted = true;
+    (video as any).playsInline = true;
+    await new Promise<void>((resolve) => {
+      video.onloadeddata = () => resolve();
+      video.onerror = () => resolve();
+    });
+
+    // Prepare synchronous overlay assets
+    let artImg: HTMLImageElement | null = null;
+    if (artBytes) {
+      try {
+        const blob = new Blob([artBytes], { type: "image/png" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.src = url;
+        await new Promise<void>((r) => {
+          if (img.complete) return r();
+          img.onload = () => r();
+          img.onerror = () => r();
+        });
+        artImg = img;
+      } catch {}
+    }
+    const layerImgs = new Map<string, HTMLImageElement>();
+    for (const it of layerBytes) {
+      try {
+        const blob = new Blob([it.bytes], { type: "image/png" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.src = url;
+        await new Promise<void>((r) => {
+          if (img.complete) return r();
+          img.onload = () => r();
+          img.onerror = () => r();
+        });
+        layerImgs.set(it.id, img);
+      } catch {}
+    }
+
+    const N = 1024;
+    const half = N >> 1;
+    const prevMag = new Float32Array(half);
+    const fluxHist: number[] = [];
+    const beatIntervals: number[] = [];
+    let lastBeatT = 0;
+    let pulse = 0;
+
+    const drawOverlaysSync = (ctx: CanvasRenderingContext2D) => {
+      // album art
+      if (template.showAlbumArt && artImg) {
+        const size = template.albumArtSize ?? 96;
+        const pad = 16;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(pad + size / 2, pad + size / 2, size / 2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(artImg, pad, pad, size, size);
+        ctx.restore();
+      }
+      if (template.titleOverlay?.show && track?.name) {
+        ctx.save();
+        ctx.fillStyle = template.titleOverlay.color;
+        ctx.font = `${template.titleOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
+        ctx.textAlign = template.titleOverlay.align as any;
+        const x = template.titleOverlay.x;
+        const y = template.titleOverlay.y;
+        ctx.fillText(track?.name, x, y);
+        ctx.restore();
+      }
+      if (template.artistOverlay?.show && track?.artist) {
+        ctx.save();
+        ctx.fillStyle = template.artistOverlay.color;
+        ctx.font = `${template.artistOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
+        ctx.textAlign = template.artistOverlay.align as any;
+        const x = template.artistOverlay.x;
+        const y = template.artistOverlay.y;
+        ctx.fillText(track?.artist, x, y);
+        ctx.restore();
+      }
+    };
+
+    const drawLayersSync = (ctx: CanvasRenderingContext2D, tSec: number, duration: number) => {
+      const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
+      for (const layer of layers as any[]) {
+        if (!layer.visible) continue;
+        switch (layer.type) {
+          case "text": {
+            const l: any = layer;
+            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
+            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
+            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
+            const size = l.kf?.size ? interpKF(l.kf.size, tSec, l.size) : l.size;
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            ctx.fillStyle = l.color;
+            ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
+            ctx.textAlign = l.align as any;
+            if (l.strokeColor && l.strokeWidth) {
+              ctx.lineWidth = l.strokeWidth;
+              ctx.strokeStyle = l.strokeColor;
+              ctx.strokeText(l.text, x, y);
+            }
+            ctx.fillText(l.text, x, y);
+            ctx.restore();
+            break;
+          }
+          case "image": {
+            const l: any = layer;
+            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
+            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
+            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
+            const size = l.kf?.size ? interpKF(l.kf.size, tSec, Math.max(l.width, l.height)) : Math.max(l.width, l.height);
+            const img = layerImgs.get(l.id) || null;
+            if (!img) break;
+            const w = l.width ?? size;
+            const h = l.height ?? size;
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            if (l.clipCircle) {
+              ctx.beginPath();
+              ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
+              ctx.closePath();
+              ctx.clip();
+            }
+            ctx.drawImage(img, x, y, w, h);
+            ctx.restore();
+            break;
+          }
+          case "shape": {
+            const l: any = layer;
+            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
+            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
+            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            if (l.shape === "rect") {
+              const w = l.width ?? 100;
+              const h = l.height ?? 50;
+              if (l.fillGradient && (l.fillGradient.from && l.fillGradient.to)) {
+                const grad = l.fillGradient.horizontal
+                  ? ctx.createLinearGradient(x, y, x + w, y)
+                  : ctx.createLinearGradient(x, y, x, y + h);
+                grad.addColorStop(0, l.fillGradient.from);
+                grad.addColorStop(1, l.fillGradient.to);
+                ctx.fillStyle = grad;
+                ctx.fillRect(x, y, w, h);
+              } else if (l.fillColor) {
+                ctx.fillStyle = l.fillColor;
+                ctx.fillRect(x, y, w, h);
+              }
+              if (l.strokeColor && l.strokeWidth) {
+                ctx.strokeStyle = l.strokeColor;
+                ctx.lineWidth = l.strokeWidth;
+                ctx.strokeRect(x, y, w, h);
+              }
+            } else if (l.shape === "circle") {
+              const r = l.radius ?? 40;
+              ctx.beginPath();
+              ctx.arc(x, y, r, 0, Math.PI * 2);
+              ctx.closePath();
+              if (l.fillColor) {
+                ctx.fillStyle = l.fillColor;
+                ctx.fill();
+              }
+              if (l.strokeColor && l.strokeWidth) {
+                ctx.strokeStyle = l.strokeColor;
+                ctx.lineWidth = l.strokeWidth;
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+            break;
+          }
+          case "progressRing": {
+            const l: any = layer;
+            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
+            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
+            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
+            const radius = l.kf?.size ? interpKF(l.kf.size, tSec, l.radius) : l.radius;
+            const thick = l.thickness ?? 8;
+            const t = duration > 0 ? Math.min(1, Math.max(0, tSec / duration)) : 0;
+            const endAngle = -Math.PI / 2 + t * Math.PI * 2;
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            ctx.lineWidth = thick;
+            ctx.strokeStyle = lerpColor(l.color1, l.color2, t);
+            ctx.beginPath();
+            ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
+            ctx.stroke();
+            ctx.restore();
+            break;
+          }
+          case "particles": {
+            const l: any = layer;
+            ctx.save();
+            ctx.globalAlpha = l.opacity;
+            ctx.fillStyle = l.color;
+            const count = l.count;
+            const speed = l.speed * (1 + 0.5 * (beatPulse || 0));
+            for (let i = 0; i < count; i++) {
+              const px = Math.random() * width;
+              const py = Math.random() * height;
+              const s = l.size * (1 + 0.3 * (beatPulse || 0));
+              ctx.beginPath();
+              ctx.arc(px, py - speed, s, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.restore();
+            break;
+          }
+        }
+      }
+    };
+
+    for (let i = 0; i < frameCount; i++) {
+      if (aborted) throw new Error("aborted");
+      const tSec = i / fps;
+
+      // seek video and draw frame
+      await new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        try {
+          video.currentTime = Math.min(video.duration || tSec, tSec);
+        } catch {
+          resolve();
+        }
+      });
+      ctx.clearRect(0, 0, width, height);
+      try {
+        ctx.drawImage(video, 0, 0, width, height);
+      } catch {
+        // fallback fill
+        const bg = template.background ?? "#0b1020";
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // analysis
+      const win = getWindow(decoded.pcm, decoded.sampleRate, tSec, N);
+      const time = computeTimeDomainUint8(win);
+      const cur = computeSpectrumUint8(win);
+
+      // smoothing similar to live analyzer
+      for (let k = 0; k < cur.length; k++) {
+        const smoothed = Math.round(prevMag[k] * 0.7 + cur[k] * 0.3);
+        cur[k] = smoothed;
+      }
+
+      // spectral flux beat detection
+      let flux = 0;
+      for (let k = 0; k < cur.length; k++) {
+        const diff = cur[k] - prevMag[k];
+        if (diff > 0) flux += diff;
+        prevMag[k] = cur[k];
+      }
+      fluxHist.push(flux);
+      if (fluxHist.length > 120) fluxHist.shift();
+      const mean = fluxHist.reduce((a, b) => a + b, 0) / fluxHist.length;
+      const variance = fluxHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / fluxHist.length;
+      const std = Math.sqrt(variance);
+      const threshold = mean + 1.8 * std;
+
+      const minInterval = 0.25;
+      if (flux > threshold && tSec - lastBeatT > minInterval) {
+        if (lastBeatT > 0) {
+          beatIntervals.push(tSec - lastBeatT);
+          if (beatIntervals.length > 12) beatIntervals.shift();
+        }
+        lastBeatT = tSec;
+        pulse = 1;
+      } else {
+        pulse *= 0.92;
+      }
+
+      const bpm =
+        beatIntervals.length >= 4
+          ? 60 / (beatIntervals.reduce((a, b) => a + b, 0) / beatIntervals.length)
+          : undefined;
+
+      // draw visualizer
+      const vis =
+        template.type === "bars" ? BarSpectrum :
+        template.type === "circle" ? CircleSpectrum :
+        Waveform;
+      vis.draw({
+        ctx: ctx as unknown as CanvasRenderingContext2D,
+        width,
+        height,
+        time: tSec,
+        freq: cur,
+        timeDomain: time,
+        template,
+        beatPulse: pulse,
+        bpm,
+        trackInfo: {
+          title: track?.name ?? "",
+          artist: track?.artist ?? ""
+        }
+      });
+
+      // overlays
+      drawOverlaysSync(ctx as any);
+
+      // layers
+      const duration = (frameCount / fps);
+      drawLayersSync(ctx as any, tSec, duration);
+
+      // write frame
+      const name = `frame_${String(i + 1).padStart(5, "0")}.png`;
       const blob: Blob = await new Promise((resolve) => (canvas as HTMLCanvasElement).toBlob((b) => resolve(b!), "image/png"));
       const ab = await blob.arrayBuffer();
       ffmpeg.FS("writeFile", name, new Uint8Array(ab));
@@ -445,7 +807,28 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     ffmpeg.FS("writeFile", audio.name, audio.data);
   }
 
-  // Run encoding
+  // Audio-only export
+  if ((opts as any).outputType === "audio") {
+    const argsAudio = [];
+    if (audio) {
+      argsAudio.push("-i", audio.name);
+      argsAudio.push("-vn");
+      argsAudio.push("-c:a", "aac");
+      const abps = String(((opts.encode?.audioBitrateKbps ?? 192) * 1000) | 0);
+      argsAudio.push("-b:a", abps);
+      argsAudio.push("out.m4a");
+      await ffmpeg.run(...(argsAudio as any));
+      if (onProgress) onProgress(1, "encode");
+      const outA = ffmpeg.FS("readFile", "out.m4a");
+      return new Blob([outA.buffer], { type: "audio/mp4" });
+    } else {
+      // no audio available
+      const empty = new Blob([], { type: "audio/mp4" });
+      return empty;
+    }
+  }
+
+  // Run video encoding
   const inputPattern = "frame_%05d.png";
   const args = [
     "-framerate", String(fps),
@@ -488,7 +871,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
 
   args.push("out.mp4");
 
-  await ffmpeg.run(...args);
+  await ffmpeg.run(...(args as any));
   if (onProgress) onProgress(1, "encode");
 
   const out = ffmpeg.FS("readFile", "out.mp4");

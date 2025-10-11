@@ -14,6 +14,10 @@ const Player: React.FC = () => {
   const eqGains = usePlayerStore((s) => s.eqGains);
   const next = usePlayerStore((s) => s.next);
   const prev = usePlayerStore((s) => s.prev);
+  const shuffle = usePlayerStore((s) => s.shuffle);
+  const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
+  const repeat = usePlayerStore((s) => s.repeat);
+  const setRepeat = usePlayerStore((s) => s.setRepeat);
 
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -31,6 +35,22 @@ const Player: React.FC = () => {
     const el = audioRef.current!;
     const track = playlist[currentIndex];
     if (!el || !track) return;
+
+    // MediaSession metadata
+    if ("mediaSession" in navigator) {
+      try {
+        (navigator as any).mediaSession.metadata = new (window as any).MediaMetadata({
+          title: track.name,
+          artist: track.artist || "",
+          album: track.album || "",
+          artwork: track.artUrl ? [{ src: track.artUrl, sizes: "512x512", type: "image/png" }] : undefined
+        });
+        (navigator as any).mediaSession.setActionHandler("play", () => setPlaying(true));
+        (navigator as any).mediaSession.setActionHandler("pause", () => setPlaying(false));
+        (navigator as any).mediaSession.setActionHandler("nexttrack", () => next());
+        (navigator as any).mediaSession.setActionHandler("previoustrack", () => prev());
+      } catch {}
+    }
 
     // fade out current audio quickly
     audioEngine.fadeTo(0.25, 0);
@@ -124,6 +144,26 @@ const Player: React.FC = () => {
         <button className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700" onClick={next}>
           Next
         </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            className={`px-2 py-1 rounded text-xs ${shuffle ? "bg-brand-700" : "bg-gray-800 hover:bg-gray-700"}`}
+            onClick={() => toggleShuffle()}
+            title="Shuffle"
+          >
+            Shuffle
+          </button>
+          <select
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+            value={repeat}
+            onChange={(e) => setRepeat(e.target.value as any)}
+            title="Repeat mode"
+          >
+            <option value="off">Repeat Off</option>
+            <option value="one">Repeat One</option>
+            <option value="all">Repeat All</option>
+          </select>
+        </div>
 
         <div className="flex items-center gap-2 flex-1">
           <span className="text-xs text-gray-300">{fmt(progress)}</span>

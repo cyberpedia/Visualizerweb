@@ -7,6 +7,8 @@ const Playlist: React.FC = () => {
   const setCurrentIndex = usePlayerStore((s) => s.setCurrentIndex);
   const removeTrack = usePlayerStore((s) => s.removeTrack);
   const clearPlaylist = usePlayerStore((s) => s.clearPlaylist);
+  const moveUp = usePlayerStore((s) => s.moveTrackUp);
+  const moveDown = usePlayerStore((s) => s.moveTrackDown);
 
   return (
     <div className="p-3">
@@ -39,15 +41,37 @@ const Playlist: React.FC = () => {
                   <div className="text-xs text-gray-400 truncate">{t.artist}</div>
                 )}
               </div>
-              <button
-                className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTrack(t.id);
-                }}
-              >
-                Remove
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveUp(t.id);
+                  }}
+                  title="Move up"
+                >
+                  ↑
+                </button>
+                <button
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveDown(t.id);
+                  }}
+                  title="Move down"
+                >
+                  ↓
+                </button>
+                <button
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTrack(t.id);
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
             </li>
           ))}
         </ul>

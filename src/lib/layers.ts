@@ -23,6 +23,21 @@ function interpKF(kf: KeyframeNumber[] | undefined, t: number, base: number): nu
   return base;
 }
 
+function applyCommon(ctx: CanvasRenderingContext2D, layer: any, x: number, y: number) {
+  ctx.globalCompositeOperation = layer.blendMode || "source-over";
+  ctx.shadowBlur = layer.shadowBlur || 0;
+  ctx.shadowColor = layer.shadowColor || "transparent";
+  const rot = (layer.rotation || 0) * Math.PI / 180;
+  const sx = layer.scaleX ?? 1;
+  const sy = layer.scaleY ?? 1;
+  const ax = layer.anchorX ?? 0;
+  const ay = layer.anchorY ?? 0;
+  ctx.translate(x + ax, y + ay);
+  if (rot) ctx.rotate(rot);
+  if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+  ctx.translate(-(x + ax), -(y + ay));
+}
+
 function drawText(
   ctx: CanvasRenderingContext2D,
   layer: any,
@@ -35,9 +50,15 @@ function drawText(
 
   ctx.save();
   ctx.globalAlpha = opacity;
+  applyCommon(ctx, layer, x, y);
   ctx.fillStyle = layer.color;
   ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
   ctx.textAlign = layer.align;
+  if (layer.strokeColor && layer.strokeWidth) {
+    ctx.lineWidth = layer.strokeWidth;
+    ctx.strokeStyle = layer.strokeColor;
+    ctx.strokeText(layer.text, x, y);
+  }
   ctx.fillText(layer.text, x, y);
   ctx.restore();
 }
@@ -59,6 +80,7 @@ function drawImage(
   const h = layer.height ?? size;
   ctx.save();
   ctx.globalAlpha = opacity;
+  applyCommon(ctx, layer, x, y);
   if (layer.clipCircle) {
     ctx.beginPath();
     ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
@@ -79,10 +101,19 @@ function drawShape(
   const opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
   ctx.save();
   ctx.globalAlpha = opacity;
+  applyCommon(ctx, layer, x, y);
   if (layer.shape === "rect") {
     const w = layer.width ?? 100;
     const h = layer.height ?? 50;
-    if (layer.fillColor) {
+    if (layer.fillGradient && (layer.fillGradient.from && layer.fillGradient.to)) {
+      const grad = layer.fillGradient.horizontal
+        ? ctx.createLinearGradient(x, y, x + w, y)
+        : ctx.createLinearGradient(x, y, x, y + h);
+      grad.addColorStop(0, layer.fillGradient.from);
+      grad.addColorStop(1, layer.fillGradient.to);
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, y, w, h);
+    } else if (layer.fillColor) {
       ctx.fillStyle = layer.fillColor;
       ctx.fillRect(x, y, w, h);
     }

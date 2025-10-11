@@ -43,6 +43,14 @@ export type BaseLayer = {
   x: number;
   y: number;
   opacity: number;
+  rotation?: number; // deg
+  scaleX?: number;
+  scaleY?: number;
+  anchorX?: number; // pivot X
+  anchorY?: number; // pivot Y
+  blendMode?: GlobalCompositeOperation;
+  shadowColor?: string;
+  shadowBlur?: number;
   kf?: {
     x?: KeyframeNumber[];
     y?: KeyframeNumber[];
@@ -58,6 +66,8 @@ export type TextLayer = BaseLayer & {
   color: string;
   size: number;
   align: "left" | "center" | "right";
+  strokeColor?: string;
+  strokeWidth?: number;
 };
 
 export type ImageLayer = BaseLayer & {
@@ -75,6 +85,7 @@ export type ShapeLayer = BaseLayer & {
   height?: number;
   radius?: number;
   fillColor: string;
+  fillGradient?: { from: string; to: string; horizontal?: boolean };
   strokeColor?: string;
   strokeWidth?: number;
 };
@@ -129,6 +140,7 @@ export type ExportSettings = {
   fps: number;
   bitrate: number; // bits per second (used when CRF unset)
   engine?: "realtime" | "offline"; // realtime MediaRecorder(WebM) or offline ffmpeg.wasm(MP4)
+  outputType?: "video" | "audio"; // audio-only export option
   // Encoding options (offline engine)
   forceCrf?: boolean;
   crf?: number; // 0..51, lower = higher quality
@@ -137,6 +149,7 @@ export type ExportSettings = {
   pixelFormat?: "yuv420p" | "yuv444p";
   parallelWorkers?: number; // number of workers for offline render (1..4)
   encodeProfile?: "fast" | "balanced" | "high";
+  videoCodec?: "libx264" | "libvpx-vp9" | "libx265";
   // Expert options
   tune?: "film" | "animation" | "grain" | "stillimage" | "psnr" | "ssim" | "fastdecode" | "zerolatency";
   profile?: "baseline" | "main" | "high" | "high444p";
@@ -159,6 +172,8 @@ type PlayerState = {
   eqGains: number[]; // length 10
   visualizerTemplate: TemplateConfig;
   analyzer: AnalyserNode | null;
+  shuffle: boolean;
+  repeat: "off" | "one" | "all";
 
   // canvas + export
   canvasEl: HTMLCanvasElement | null;
@@ -168,8 +183,11 @@ type PlayerState = {
 
   // actions
   addTracks: (tracks: Track[]) => void;
+  addUrlTrack: (url: string) => void;
   removeTrack: (id: string) => void;
   clearPlaylist: () => void;
+  moveTrackUp: (id: string) => void;
+  moveTrackDown: (id: string) => void;
   setCurrentIndex: (idx: number) => void;
   setPlaying: (p: boolean) => void;
   setVolume: (v: number) => void;
@@ -188,6 +206,8 @@ type PlayerState = {
   updateExportPresetNotes: (id: string, notes: string) => void;
   updateExportPresetCategory: (id: string, category: string) => void;
   applyExportPreset: (id: string) => void;
+  toggleShuffle: () => void;
+  setRepeat: (mode: "off" | "one" | "all") => void;
   next: () => void;
   prev: () => void;
 };
@@ -230,6 +250,7 @@ const DEFAULT_EXPORT: ExportSettings = {
   fps: 30,
   bitrate: 4_000_000,
   engine: "realtime",
+  outputType: "video",
   forceCrf: false,
   crf: 23,
   preset: "veryfast",
@@ -237,6 +258,7 @@ const DEFAULT_EXPORT: ExportSettings = {
   pixelFormat: "yuv420p",
   parallelWorkers: 2,
   encodeProfile: "balanced",
+  videoCodec: "libx264",
   tune: undefined,
   profile: undefined,
   level: undefined
@@ -252,6 +274,8 @@ export const usePlayerStore = create<PlayerState>()(
       eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       visualizerTemplate: DEFAULT_TEMPLATE,
       analyzer: null,
+      shuffle: false,
+      repeat: "off",
 
       canvasEl: null,
       exportActive: false,
@@ -263,6 +287,23 @@ export const usePlayerStore = create<PlayerState>()(
           playlist: [...s.playlist, ...tracks],
           currentIndex: s.currentIndex === -1 ? 0 : s.currentIndex
         })),
+      addUrlTrack: (url) =>
+        set((s) => {
+          const nameFromUrl = url.split("/").pop() || url;
+          const t: Track = {
+            id: crypto.randomUUID(),
+            name: decodeURIComponent(nameFromUrl),
+            url,
+            artist: "",
+            album: "",
+            duration: 0,
+            artUrl: null
+          };
+          return {
+            playlist: [...s.playlist, t],
+            currentIndex: s.currentIndex === -1 ? 0 : s.currentIndex
+          };
+        }),
       removeTrack: (id) =>
         set((s) => ({
           playlist: s.playlist.filter((t) => t.id !== id)
@@ -273,6 +314,26 @@ export const usePlayerStore = create<PlayerState>()(
           currentIndex: -1,
           playing: false
         })),
+      moveTrackUp: (id) =>
+        set((s) => {
+          const idx = s.playlist.findIndex((t) => t.id === id);
+          if (idx <= 0) return {};
+          const list = s.playlist.slice();
+          const [item] = list.splice(idx, 1);
+          list.splice(idx - 1, 0, item);
+          const currentIndex = s.currentIndex === idx ? idx - 1 : s.currentIndex;
+          return { playlist: list, currentIndex };
+        }),
+      moveTrackDown: (id) =>
+        set((s) => {
+          const idx = s.playlist.findIndex((t) => t.id === id);
+          if (idx === -1 || idx >= s.playlist.length - 1) return {};
+          const list = s.playlist.slice();
+          const [item] = list.splice(idx, 1);
+          list.splice(idx + 1, 0, item);
+          const currentIndex = s.currentIndex === idx ? idx + 1 : s.currentIndex;
+          return { playlist: list, currentIndex };
+        }),
       setCurrentIndex: (idx) => set(() => ({ currentIndex: idx })),
       setPlaying: (p) => set(() => ({ playing: p })),
       setVolume: (v) => set(() => ({ volume: Math.min(1, Math.max(0, v)) })),
@@ -346,17 +407,35 @@ export const usePlayerStore = create<PlayerState>()(
           const p = s.exportPresets.find((pp) => pp.id === id);
           return p ? { exportSettings: { ...s.exportSettings, ...p.settings } } : {};
         }),
+      toggleShuffle: () =>
+        set((s) => ({ shuffle: !s.shuffle })),
+      setRepeat: (mode) =>
+        set(() => ({ repeat: mode })),
       next: () => {
-        const { playlist, currentIndex } = get();
+        const { playlist, currentIndex, shuffle, repeat } = get();
         if (playlist.length === 0) return;
-        const nextIdx = (currentIndex + 1) % playlist.length;
-        set(() => ({ currentIndex: nextIdx }));
+        if (repeat === "one") {
+          set(() => ({ currentIndex }));
+          return;
+        }
+        if (shuffle) {
+          const nextIdx = Math.floor(Math.random() * playlist.length);
+          set(() => ({ currentIndex: nextIdx }));
+        } else {
+          const nextIdx = (currentIndex + 1) % playlist.length;
+          set(() => ({ currentIndex: nextIdx }));
+        }
       },
       prev: () => {
-        const { playlist, currentIndex } = get();
+        const { playlist, currentIndex, shuffle } = get();
         if (playlist.length === 0) return;
-        const prevIdx = (currentIndex - 1 + playlist.length) % playlist.length;
-        set(() => ({ currentIndex: prevIdx }));
+        if (shuffle) {
+          const prevIdx = Math.floor(Math.random() * playlist.length);
+          set(() => ({ currentIndex: prevIdx }));
+        } else {
+          const prevIdx = (currentIndex - 1 + playlist.length) % playlist.length;
+          set(() => ({ currentIndex: prevIdx }));
+        }
       }
     }),
     {
@@ -368,7 +447,9 @@ export const usePlayerStore = create<PlayerState>()(
         eqGains: s.eqGains,
         visualizerTemplate: s.visualizerTemplate,
         exportSettings: s.exportSettings,
-        exportPresets: s.exportPresets
+        exportPresets: s.exportPresets,
+        shuffle: s.shuffle,
+        repeat: s.repeat
       })
     }
   )
