@@ -29,7 +29,8 @@ Audio and playlist
 
 DSP and controls
 - 10‑band EQ (31 Hz → 16 kHz) with peaking filters
-- Playback speed (0.5–2.0×), stereo pan, and a dynamics compressor toggle
+- Playback speed (0.5–2.0×), stereo pan, a dynamics compressor toggle
+- Reverb (convolution) with wet mix toggle/slider
 - Precomputed waveform per track for scrubber UI (cached in IndexedDB)
 
 Visualizers and overlays
@@ -47,7 +48,7 @@ Beat detection and info
 
 Background media
 - Background image URL
-- Background video (offline export): worker-side ffmpeg.wasm decode to frames for deterministic compositing
+- Background video: realtime rendering in Canvas2D/WebGL; offline export uses worker-side ffmpeg.wasm decode for deterministic compositing
 
 Export
 - Realtime export (WebM): CanvasCaptureMediaStream + WebAudio MediaStreamDestination + MediaRecorder
@@ -60,15 +61,14 @@ Export
 
 Persistence and PWA
 - Zustand persistence in localStorage (playlist index, volume, EQ, template, export settings)
-- IndexedDB caching for waveforms
+- IndexedDB caching for waveforms and URL-based playlist persistence
 - Responsive UI; PWA install prompt; icons/manifests
 
 ## Known limitations
 
 - Realtime export is WebM only and best-supported in Chrome/Edge; Safari/iOS should use Offline export (MP4/M4A).
 - yuv444p and high444p profile have limited hardware decoder support on many devices.
-- Background video in realtime renderer is not composited; offline export path handles background video deterministically.
-- Reverb and advanced DSP (BPM stabilization, phase-vocoder quality) are not yet implemented.
+- Advanced DSP (BPM stabilization, phase‑vocoder quality pitch/time) can be improved further.
 
 ## Roadmap
 

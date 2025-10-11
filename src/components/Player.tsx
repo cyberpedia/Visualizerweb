@@ -19,6 +19,10 @@ const Player: React.FC = () => {
   const setPan = usePlayerStore((s) => s.setPan);
   const compressorOn = usePlayerStore((s) => s.compressorOn);
   const setCompressorOn = usePlayerStore((s) => s.setCompressorOn);
+  const reverbOn = usePlayerStore((s) => s.reverbOn);
+  const setReverbOn = usePlayerStore((s) => s.setReverbOn);
+  const reverbWet = usePlayerStore((s) => s.reverbWet);
+  const setReverbWet = usePlayerStore((s) => s.setReverbWet);
   const eqGains = usePlayerStore((s) => s.eqGains);
   const next = usePlayerStore((s) => s.next);
   const prev = usePlayerStore((s) => s.prev);
@@ -39,6 +43,8 @@ const Player: React.FC = () => {
     audioEngine.setPlaybackRate(playbackRate);
     audioEngine.setPan(pan);
     audioEngine.setCompressor(compressorOn);
+    audioEngine.setReverb(reverbOn);
+    audioEngine.setReverbWet(reverbWet);
   }, []);
 
   // Track change with simple crossfade
@@ -115,6 +121,15 @@ const Player: React.FC = () => {
   useEffect(() => {
     audioEngine.setCompressor(compressorOn);
   }, [compressorOn]);
+
+  // Reverb
+  useEffect(() => {
+    audioEngine.setReverb(reverbOn);
+  }, [reverbOn]);
+
+  useEffect(() => {
+    audioEngine.setReverbWet(reverbWet);
+  }, [reverbWet]);
 
   // Equalizer
   useEffect(() => {
@@ -262,6 +277,28 @@ const Player: React.FC = () => {
           />
           Compressor
         </label>
+
+        <label className="flex items-center gap-1 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            checked={reverbOn}
+            onChange={(e) => setReverbOn(e.target.checked)}
+          />
+          Reverb
+        </label>
+        <div className="flex items-center gap-2 w-44">
+          <span className="text-xs text-gray-300">Wet</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={reverbWet}
+            onChange={(e) => setReverbWet(Number(e.target.value))}
+            className="flex-1 accent-brand-500"
+            title="Reverb wet mix"
+          />
+        </div>
 
         <div className="flex items-center gap-2 w-44">
           <span className="text-xs text-gray-300">Pan</span>

@@ -188,6 +188,29 @@ void main() {
 `, FS_COLOR);
     const progTex = createProgram(gl, VS_TEX, FS_TEX);
 
+    // Background video support
+    let videoEl: HTMLVideoElement | null = null;
+    let videoTex: WebGLTexture | null = null;
+    if (template.backgroundVideoUrl) {
+      videoEl = document.createElement("video");
+      videoEl.src = template.backgroundVideoUrl!;
+      videoEl.muted = true;
+      // @ts-ignore
+      videoEl.playsInline = true;
+      videoEl.loop = true;
+      videoEl.crossOrigin = "anonymous";
+      videoEl.autoplay = true;
+      videoEl.addEventListener("error", () => {});
+      videoEl.play().catch(() => {});
+      videoTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, videoTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+
     // SDF text shader (crisp scalable text)
     const FS_SDF = `
 precision mediump float;
@@ -517,6 +540,29 @@ void main(){
       const bg = hexToRGB(template.background || "#0b1020");
       gl.clearColor(bg[0], bg[1], bg[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
+
+      // Draw background video if available
+      if (videoEl && videoTex && videoEl.readyState >= 2) {
+        gl.useProgram(progTex);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+        const aPosVideoLoc = gl.getAttribLocation(progTex, "aPos");
+        gl.enableVertexAttribArray(aPosVideoLoc);
+        gl.vertexAttribPointer(aPosVideoLoc, 2, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+        const aTexVideoLoc = gl.getAttribLocation(progTex, "aTex");
+        gl.enableVertexAttribArray(aTexVideoLoc);
+        gl.vertexAttribPointer(aTexVideoLoc, 2, gl.FLOAT, false, 0, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, videoTex);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+        try {
+          // Update texture from current video frame
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoEl);
+        } catch {}
+        gl.uniform1i(uSamplerLoc, 0);
+        gl.uniform1f(uAlphaTexLoc, 1.0);
+        gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+      }
 
       const c1 = hexToRGB(template.color1 || "#6366f1");
       const c2 = hexToRGB(template.color2 || "#22d3ee");

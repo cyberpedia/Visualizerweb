@@ -39,3 +39,20 @@ export async function getAsset(key: string): Promise<ArrayBuffer | null> {
     req.onerror = () => reject(req.error || new Error("getAsset failed"));
   });
 }
+
+export async function setJSON(key: string, obj: any): Promise<void> {
+  const text = JSON.stringify(obj);
+  const buf = new TextEncoder().encode(text).buffer;
+  await setAsset(key, buf);
+}
+
+export async function getJSON<T = any>(key: string): Promise<T | null> {
+  const buf = await getAsset(key);
+  if (!buf) return null;
+  try {
+    const text = new TextDecoder().decode(new Uint8Array(buf));
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { usePlayerStore } from "./state/store";
 import Playlist from "./components/Playlist";
 import Player from "./components/Player";
@@ -12,9 +12,47 @@ import TimelineEditor from "./components/TimelineEditor";
 import Exporter from "./components/Exporter";
 import FileBrowser from "./components/FileBrowser";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
+import { loadPlaylist, savePlaylist } from "./utils/playlist";
 
 export default function App() {
   const renderer = usePlayerStore((s) => s.visualizerTemplate.renderer ?? "canvas2d");
+  const playlist = usePlayerStore((s) => s.playlist);
+  const addUrlTrack = usePlayerStore((s) => s.addUrlTrack);
+
+  // Load persisted playlist (http/https URLs only) on startup
+  useEffect(() => {
+    (async () => {
+      const saved = await loadPlaylist();
+      if (saved && saved.length) {
+        for (const t of saved) {
+          addUrlTrack(t.url);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist playlist (URLs only) when it changes
+  useEffect(() => {
+    const toSave = playlist
+      .filter((t) => {
+        try {
+          const u = new URL(t.url);
+          return u.protocol === "http:" || u.protocol === "https:";
+        } catch {
+          return false;
+        }
+      })
+      .map((t) => ({
+        name: t.name,
+        url: t.url,
+        artist: t.artist,
+        album: t.album,
+        duration: t.duration,
+        artUrl: t.artUrl || null
+      }));
+    savePlaylist(toSave).catch(() => {});
+  }, [playlist]);
 
   return (
     <div className="h-full w-full flex flex-col">

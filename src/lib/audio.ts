@@ -11,6 +11,9 @@ export class AudioEngine {
   eqNodes: BiquadFilterNode[] = [];
   compressor: DynamicsCompressorNode | null = null;
   panner: StereoPannerNode | null = null;
+  convolver: ConvolverNode | null = null;
+  wetGain: GainNode | null = null;
+  dryGain: GainNode | null = null;
   analyzer: AnalyserNode | null = null;
   streamDest: MediaStreamAudioDestinationNode | null = null;
 
@@ -19,6 +22,20 @@ export class AudioEngine {
   ensureCtx() {
     if (!this.ctx) this.ctx = new AudioContext();
     return this.ctx!;
+  }
+
+  private buildImpulse(seconds: number = 2, decay: number = 2): AudioBuffer {
+    const ctx = this.ensureCtx();
+    const rate = ctx.sampleRate;
+    const len = Math.max(1, Math.floor(seconds * rate));
+    const buf = ctx.createBuffer(2, len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+      }
+    }
+    return buf;
   }
 
   attachAudioElement(audioEl: HTMLAudioElement) {
@@ -46,13 +63,20 @@ export class AudioEngine {
     this.panner = ctx.createStereoPanner();
     this.panner.pan.value = 0;
 
+    this.convolver = ctx.createConvolver();
+    this.convolver.buffer = this.buildImpulse(2.5, 2.5);
+    this.wetGain = ctx.createGain();
+    this.wetGain.gain.value = 0.0; // default off
+    this.dryGain = ctx.createGain();
+    this.dryGain.gain.value = 1.0;
+
     this.analyzer = ctx.createAnalyser();
     this.analyzer.fftSize = 2048;
     this.analyzer.smoothingTimeConstant = 0.8;
 
     this.streamDest = ctx.createMediaStreamDestination();
 
-    // connect source -> eq -> compressor -> gain -> panner
+    // connect source -> eq -> compressor -> panner
     let node: AudioNode = this.source;
     for (const eq of this.eqNodes) {
       node.connect(eq);
@@ -60,15 +84,27 @@ export class AudioEngine {
     }
     node.connect(this.compressor!);
     node = this.compressor!;
-    node.connect(this.gainNode!);
-    node = this.gainNode!;
     node.connect(this.panner!);
     node = this.panner!;
 
+    // split dry/wet to mix reverb
+    node.connect(this.dryGain!);
+    node.connect(this.convolver!);
+    this.convolver!.connect(this.wetGain!);
+
+    // mix wet + dry -> gain -> outputs
+    const mixGain = ctx.createGain();
+    this.dryGain!.connect(mixGain);
+    this.wetGain!.connect(mixGain);
+
+    // global gain
+    this.gainNode = this.gainNode || ctx.createGain();
+    mixGain.connect(this.gainNode);
+
     // tee to destination, analyzer, and streamDest
-    node.connect(ctx.destination);
-    node.connect(this.analyzer!);
-    node.connect(this.streamDest!);
+    this.gainNode.connect(ctx.destination);
+    this.gainNode.connect(this.analyzer!);
+    this.gainNode.connect(this.streamDest!);
   }
 
   resume() {
@@ -107,6 +143,18 @@ export class AudioEngine {
       this.compressor.attack.value = 0.001;
       this.compressor.release.value = 0.05;
     }
+  }
+
+  setReverb(on: boolean) {
+    if (!this.wetGain || !this.dryGain) return;
+    this.wetGain.gain.value = on ? (this.wetGain.gain.value || 0.25) : 0.0;
+    this.dryGain.gain.value = on ? 1.0 : 1.0; // keep dry path; wet controls mix
+  }
+
+  setReverbWet(value: number) {
+    if (!this.wetGain) return;
+    const v = Math.min(1, Math.max(0, value));
+    this.wetGain.gain.value = v;
   }
 
   fadeTo(seconds: number, target: number) {

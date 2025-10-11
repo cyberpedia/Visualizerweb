@@ -563,7 +563,12 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
 
     const bpm =
       beatIntervals.length >= 4
-        ? 60 / (beatIntervals.reduce((a, b) => a + b, 0) / beatIntervals.length)
+        ? (() => {
+            const arr = beatIntervals.slice().sort((a, b) => a - b);
+            const mid = Math.floor(arr.length / 2);
+            const med = arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+            return 60 / med;
+          })()
         : undefined;
 
     // choose visualizer

@@ -175,6 +175,8 @@ type PlayerState = {
   playbackRate: number; // 0.5..2
   pan: number; // -1..1
   compressorOn: boolean;
+  reverbOn: boolean;
+  reverbWet: number; // 0..1
   eqGains: number[]; // length 10
   visualizerTemplate: TemplateConfig;
   analyzer: AnalyserNode | null;
@@ -283,7 +285,9 @@ export const usePlayerStore = create<PlayerState>()(
       playbackRate: 1,
       pan: 0,
       compressorOn: false,
-      eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      reverbOn: false,
+      reverbWet: 0.25,
+      eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0
       visualizerTemplate: DEFAULT_TEMPLATE,
       analyzer: null,
       shuffle: false,
@@ -469,6 +473,8 @@ export const usePlayerStore = create<PlayerState>()(
         playbackRate: s.playbackRate,
         pan: s.pan,
         compressorOn: s.compressorOn,
+        reverbOn: s.reverbOn,
+        reverbWet: s.reverbWet,
         eqGains: s.eqGains,
         visualizerTemplate: s.visualizerTemplate,
         exportSettings: s.exportSettings,
