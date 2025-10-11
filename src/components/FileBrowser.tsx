@@ -37,22 +37,33 @@ const FileBrowser: React.FC = () => {
     // @ts-ignore
     const dirHandle: FileSystemDirectoryHandle = await window.showDirectoryPicker();
     const tracks: Track[] = [];
-    for await (const [name, handle] of dirHandle.entries()) {
-      if (handle.kind !== "file") continue;
-      const ext = name.split(".").pop()?.toLowerCase() || "";
-      if (!audioExt.has(ext)) continue;
-      const file = await (handle as FileSystemFileHandle).getFile();
-      const url = URL.createObjectURL(file);
-      const meta = await readTrackMeta(file);
-      tracks.push({
-        id: crypto.randomUUID(),
-        name: meta.title || file.name,
-        url,
-        artist: meta.artist,
-        album: meta.album,
-        duration: meta.duration,
-        artUrl;
-    }
+
+    const collectFromDir = async (dh: any) => {
+      // recursively traverse directory entries
+      for await (const [name, handle] of dh.entries()) {
+        if (handle.kind === "file") {
+          const ext = name.split(".").pop()?.toLowerCase() || "";
+          if (!audioExt.has(ext)) continue;
+          const file = await (handle as FileSystemFileHandle).getFile();
+          const url = URL.createObjectURL(file);
+          const meta = await readTrackMeta(file);
+          tracks.push({
+            id: crypto.randomUUID(),
+            name: meta.title || file.name,
+            url,
+            artist: meta.artist,
+            album: meta.album,
+            duration: meta.duration,
+            artUrl: meta.artUrl || null
+          });
+        } else if (handle.kind === "directory") {
+          await collectFromDir(handle);
+        }
+      }
+    };
+
+    await collectFromDir(dirHandle);
+
     if (tracks.length) addTracks(tracks);
   };
 

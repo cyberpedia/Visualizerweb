@@ -186,6 +186,42 @@ const TemplateEditor: React.FC = () => {
       </div>
 
       <div className="mb-3">
+        <div className="text-xs text-gray-300 mb-1">Background video</div>
+        <div className="grid grid-cols-3 gap-2">
+          <input
+            type="text"
+            placeholder="https://example.com/video.mp4"
+            value={template.backgroundVideoUrl ?? ""}
+            onChange={(e) => set({ backgroundVideoUrl: e.target.value || null })}
+            className="col-span-2 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm"
+          />
+          <label className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 cursor-pointer text-center">
+            Pick file
+            <input
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const url = URL.createObjectURL(f);
+                set({ backgroundVideoUrl: url });
+              }}
+            />
+          </label>
+          <button
+            className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+            onClick={() => set({ backgroundVideoUrl: null })}
+          >
+            Clear
+          </button>
+        </div>
+        <div className="text-[11px] text-gray-400 mt-1">
+          Note: local video URLs are temporary and won’t persist after reload.
+        </div>
+      </div>
+
+      <div className="mb-3">
         <div className="text-xs text-gray-300 mb-1">Background (hex)</div>
         <input
           type="text"

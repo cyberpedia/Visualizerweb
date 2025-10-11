@@ -61,10 +61,24 @@ const VisualizerCanvas: React.FC = () => {
     const prevArr = new Uint8Array(analyzer.frequencyBinCount);
     let pulse = 0;
 
-    // cache background image for this effect lifecycle
+    // cache background media for this effect lifecycle
     const bgImg = template.backgroundImageUrl ? new Image() : null;
     if (bgImg) {
       bgImg.src = template.backgroundImageUrl!;
+    }
+    const bgVideo = template.backgroundVideoUrl ? document.createElement("video") : null;
+    if (bgVideo) {
+      bgVideo.src = template.backgroundVideoUrl!;
+      bgVideo.muted = true;
+      // @ts-ignore - playsInline exists on HTMLVideoElement
+      bgVideo.playsInline = true;
+      bgVideo.loop = true;
+      bgVideo.crossOrigin = "anonymous";
+      bgVideo.autoplay = true;
+      bgVideo.addEventListener("error", () => {
+        // ignore errors
+      });
+      bgVideo.play().catch(() => {});
     }
 
     const draw = (t: number) => {
@@ -85,10 +99,10 @@ const VisualizerCanvas: React.FC = () => {
         pulse *= 0.92;
       }
 
-      // background image support
-      if (bgImg && bgImg.complete) {
-        const w = exportActive ? canvas.width : canvas.clientWidth;
-        const h = exportActive ? canvas.height : canvas.clientHeight;
+      // background media support
+      const w = exportActive ? canvas.width : canvas.clientWidth;
+      const h = exportActive ? canvas.height : canvas.clientHeight;
+      if (bgVideo && bgVideolientHeight;
         ctx.drawImage(bgImg, 0, 0, w, h);
       }
 

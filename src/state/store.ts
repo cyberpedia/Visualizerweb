@@ -37,6 +37,7 @@ export type TemplateConfig = {
   color2: string;
   background?: string | null;
   backgroundImageUrl?: string | null;
+  backgroundVideoUrl?: string | null;
   glowStrength?: number; // shadow blur intensity
   showInfo?: boolean;
   showAlbumArt?: boolean;
@@ -99,6 +100,7 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
   color2: "#22d3ee",
   background: "#0b1020",
   backgroundImageUrl: null,
+  backgroundVideoUrl: null,
   glowStrength: 0,
   showInfo: true,
   showAlbumArt: true,

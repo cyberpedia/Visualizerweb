@@ -22,8 +22,8 @@ export type Visualizer = {
 export function clear(frame: VisualizerFrame) {
   const { ctx, width, height, template } = frame;
   ctx.clearRect(0, 0, width, height);
-  if (template.backgroundImageUrl) {
-    // When using an image background, do not fill here.
+  if (template.backgroundImageUrl || template.backgroundVideoUrl) {
+    // When using a media background, do not fill here.
     return;
   }
   const bg = template.background ?? "#0b1020";
