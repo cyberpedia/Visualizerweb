@@ -121,6 +121,23 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
     }
   },
   {
+    name: "Instagram Square 1080×1080 (60fps)",
+    settings: {
+      mode: "custom",
+      width: 1080,
+      height: 1080,
+      fps: 60,
+      preset: "fast",
+      forceCrf: true,
+      crf: 22,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "4.1",
+      parallelWorkers: 2
+    }
+  },
+  {
     name: "TikTok Vertical 1080×1920",
     settings: {
       mode: "custom",
@@ -134,6 +151,75 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
       pixelFormat: "yuv420p",
       profile: "high",
       level: "4.1",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "TikTok Vertical 1080×1920 (60fps)",
+    settings: {
+      mode: "custom",
+      width: 1080,
+      height: 1920,
+      fps: 60,
+      preset: "fast",
+      forceCrf: true,
+      crf: 22,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "4.1",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "Instagram Reels 720×1280",
+    settings: {
+      mode: "custom",
+      width: 720,
+      height: 1280,
+      fps: 30,
+      preset: "fast",
+      forceCrf: true,
+      crf: 22,
+      audioBitrateKbps: 160,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "3.1",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "YouTube Shorts 1080×1920 (60fps)",
+    settings: {
+      mode: "custom",
+      width: 1080,
+      height: 1920,
+      fps: 60,
+      preset: "medium",
+      forceCrf: true,
+      crf: 20,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "4.1",
+      tune: "film",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "Twitter Square 720×720 (CBR)",
+    settings: {
+      mode: "custom",
+      width: 720,
+      height: 720,
+      fps: 30,
+      preset: "faster",
+      forceCrf: false,
+      bitrate: 4_000_000,
+      audioBitrateKbps: 128,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "3.1",
       parallelWorkers: 2
     }
   },
@@ -296,6 +382,13 @@ const ExportPresetsEditor: React.FC = () => {
                 title="Apply preset"
               >
                 Apply
+              </button>
+              <button
+                className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+                onClick={() => addPreset(`Copy of ${p.name}`, p.settings)}
+                title="Duplicate preset"
+              >
+                Duplicate
               </button>
               <button
                 className="px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-xs"

@@ -20,6 +20,7 @@ const Exporter: React.FC = () => {
   const abortCtrlRef = useRef<AbortController | null>(null);
   const [showPresets, setShowPresets] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
+  const [showPlatformTips, setShowPlatformTips] = useState(false);
 
   const addPreset = usePlayerStore((s) => s.addExportPreset);
   const exportPresetsList = usePlayerStore((s) => s.exportPresets);
@@ -372,6 +373,13 @@ const Exporter: React.FC = () => {
             Import JSON
           </label>
           {importingJSON && <span className="text-xs text-gray-400">Importing…</span>}
+          <button
+            className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+            onClick={() => setShowPlatformTips((v) => !v)}
+            title="Show platform-specific export tips"
+          >
+            {showPlatformTips ? "Hide Tips" : "Platform Tips"}
+          </button>
         </>
       )}
 
@@ -576,6 +584,55 @@ const Exporter: React.FC = () => {
       </div>
     )
     }
+
+    {showPlatformTips && exportSettings.engine === "offline" && (
+      <div className="mt-2 bg-gray-900 border border-gray-800 rounded p-3 text-xs text-gray-300">
+        <div className="font-semibold mb-1">Platform export tips</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <div className="text-gray-200 mb-1">YouTube</div>
+            <ul className="list-disc ml-4">
+              <li>Resolution: 1080p (1920×1080) or 4K (3840×2160)</li>
+              <li>FPS: 30 or 60</li>
+              <li>Encoding: CRF 18–22, preset medium/fast, pixelFormat yuv420p</li>
+              <li>Profile/Level: high, 4.0 (1080p30) or 4.1 (1080p60)</li>
+              <li>Tune: film or ssim for visuals</li>
+              <li>Audio: 192–320 kbps AAC</li>
+            </ul>
+          </div>
+          <div>
+            <div className="text-gray-200 mb-1">TikTok</div>
+            <ul className="list-disc ml-4">
+              <li>Resolution: 1080×1920 (vertical)</li>
+              <li>FPS: 30 or 60</li>
+              <li>Encoding: CRF 20–24, preset fast/medium, yuv420p</li>
+              <li>Profile/Level: high, 4.1 recommended</li>
+              <li>Audio: 192 kbps AAC</li>
+            </ul>
+          </div>
+          <div>
+            <div className="text-gray-200 mb-1">Instagram</div>
+            <ul className="list-disc ml-4">
+              <li>Square: 1080×1080 (30/60 fps)</li>
+              <li>Reels (vertical): 720×1280 or 1080×1920</li>
+              <li>Encoding: CRF 20–24, preset fast/medium, yuv420p</li>
+              <li>Profile/Level: high, 3.1 (720p) or 4.1 (1080p)</li>
+              <li>Audio: 160–192 kbps AAC</li>
+            </ul>
+          </div>
+          <div>
+            <div className="text-gray-200 mb-1">Twitter/X</div>
+            <ul className="list-disc ml-4">
+              <li>Resolution: 720p or 1080p (square 720×720 supported)</li>
+              <li>FPS: 30 recommended</li>
+              <li>Encoding: Bitrate 4–8 Mbps or CRF ~22, preset faster/fast</li>
+              <li>Pixel format: yuv420p, profile high, level 3.1 (720p) or 4.0 (1080p)</li>
+              <li>Audio: 128–192 kbps AAC</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 };
