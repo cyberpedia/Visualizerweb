@@ -24,6 +24,9 @@ export type OfflineExportOptions = {
     audioBitrateKbps?: number;
     pixelFormat?: "yuv420p" | "yuv444p";
     videoCodec?: "libx264";
+    tune?: "film" | "animation" | "grain" | "stillimage" | "psnr" | "ssim" | "fastdecode" | "zerolatency";
+    profile?: "baseline" | "main" | "high" | "high444p";
+    level?: "3.0" | "3.1" | "4.0" | "4.1" | "5.0" | "5.1" | "5.2";
   };
   parallelWorkers?: number;
 };
@@ -454,6 +457,15 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
   } else {
     args.push("-b:v", String(bitrate || 4_000_000));
   }
+
+  // Expert options
+  const profile = opts.encode?.profile;
+  const level = opts.encode?.level;
+  const tune = opts.encode?.tune;
+
+  if (profile) args.push("-profile:v", profile);
+  if (level) args.push("-level", level);
+  if (tune) args.push("-tune", tune);
 
   if (audio) {
     args.push("-c:a", "aac");

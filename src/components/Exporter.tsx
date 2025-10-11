@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { audioEngine } from "../lib/audio";
 import { usePlayerStore } from "../state/store";
 import { exportOfflineMP4 } from "../lib/offlineExport";
+import ExportPresetsEditor from "./ExportPresetsEditor";
 
 const Exporter: React.FC = () => {
   const playing = usePlayerStore((s) => s.playing);
@@ -17,6 +18,8 @@ const Exporter: React.FC = () => {
   const chunksRef = useRef<Blob[]>([]);
   const [offlineProgress, setOfflineProgress] = useState<{ p: number; phase: "capture" | "encode" | null }>({ p: 0, phase: null });
   const abortCtrlRef = useRef<AbortController | null>(null);
+  const [showPresets, setShowPresets] = useState(false);
+  const [showExpert, setShowExpert] = useState(false);
 
   const applyPreset = (profile: "fast" | "balanced" | "high") => {
     if (profile === "fast") {
@@ -87,7 +90,10 @@ const Exporter: React.FC = () => {
               preset: exportSettings.preset,
               audioBitrateKbps: exportSettings.audioBitrateKbps,
               pixelFormat: exportSettings.pixelFormat,
-              videoCodec: "libx264"
+              videoCodec: "libx264",
+              profile: exportSettings.profile,
+              level: exportSettings.level,
+              tune: exportSettings.tune
             },
             parallelWorkers: exportSettings.parallelWorkers ?? 2
           });
@@ -189,6 +195,7 @@ const Exporter: React.FC = () => {
   };
 
   return (
+    <>
     <div className="flex items-center gap-2">
       <button
         className={`px-3 py-1 rounded ${exportActive ? "bg-red-600 hover:bg-red-500" : "bg-gray-800 hover:bg-gray-700"}`}
@@ -219,6 +226,16 @@ const Exporter: React.FC = () => {
           <option value="balanced">Balanced</option>
           <option value="high">High Quality</option>
         </select>
+      )}
+
+      {exportSettings.engine === "offline" && (
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          onClick={() => setShowPresets((v) => !v)}
+          title="Manage custom encoding presets"
+        >
+          {showPresets ? "Hide Presets" : "Manage Presets"}
+        </button>
       )}
 
       <select
@@ -277,6 +294,12 @@ const Exporter: React.FC = () => {
               onChange={(e) => setExportSettings({ forceCrf: e.target.checked })}
             />
             Use CRF
+            <span
+              className="ml-1 px-1 rounded bg-gray-800 text-gray-300"
+              title="CRF vs Bitrate: CRF targets quality (lower=better, typical 18–24). Bitrate targets a fixed video data rate. Use CRF for quality-focused exports; use bitrate to control file size or streaming constraints."
+            >
+              ?
+            </span>
           </label>
           <select
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
@@ -297,14 +320,14 @@ const Exporter: React.FC = () => {
             value={exportSettings.crf ?? 23}
             onChange={(e) => setExportSettings({ crf: Number(e.target.value) })}
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-20"
-            title="CRF (quality, lower is higher quality)"
+            title="CRF (quality, lower is higher quality). Recommended: 18–24 for x264."
           />
           <input
             type="number"
             value={exportSettings.audioBitrateKbps ?? 192}
             onChange={(e) => setExportSettings({ audioBitrateKbps: Number(e.target.value) })}
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-24"
-            title="Audio kbps"
+            title="Audio kbps (192–320 recommended for music)"
           />
           <select
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
@@ -322,6 +345,13 @@ const Exporter: React.FC = () => {
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-24"
             title="Parallel workers (1-4)"
           />
+          <button
+            className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+            onClick={() => setShowExpert((v) => !v)}
+            title="Show expert codec options"
+          >
+            {showExpert ? "Hide Expert" : "Expert"}
+          </button>
         </>
       )}
 
@@ -332,6 +362,70 @@ const Exporter: React.FC = () => {
         </div>
       )}
     </div>
+
+    {showPresets && exportSettings.engine === "offline" && (
+      <div className="mt-2">
+        <ExportPresetsEditor />
+      </div>
+    )}
+
+    {showExpert && exportSettings.engine === "offline" && (
+      <div className="mt-2 bg-gray-900 border border-gray-800 rounded p-3 text-xs text-gray-300">
+        <div className="flex items-center gap-2">
+          <select
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1"
+            value={exportSettings.tune ?? ""}
+            onChange={(e) => setExportSettings({ tune: (e.target.value || undefined) as any })}
+            title="x264 tune"
+          >
+            <option value="">(none)</option>
+            <option value="film">film</option>
+            <option value="animation">animation</option>
+            <option value="grain">grain</option>
+            <option value="stillimage">stillimage</option>
+            <option value="psnr">psnr</option>
+            <option value="ssim">ssim</option>
+            <option value="fastdecode">fastdecode</option>
+            <option value="zerolatency">zerolatency</option>
+          </select>
+          <select
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1"
+            value={exportSettings.profile ?? ""}
+            onChange={(e) => setExportSettings({ profile: (e.target.value || undefined) as any })}
+            title="H.264 profile"
+          >
+            <option value="">(auto)</option>
+            <option value="baseline">baseline</option>
+            <option value="main">main</option>
+            <option value="high">high</option>
+            <option value="high444p">high444p</option>
+          </select>
+          <select
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1"
+            value={exportSettings.level ?? ""}
+            onChange={(e) => setExportSettings({ level: (e.target.value || undefined) as any })}
+            title="H.264 level"
+          >
+            <option value="">(auto)</option>
+            <option value="3.0">3.0</option>
+            <option value="3.1">3.1</option>
+            <option value="4.0">4.0</option>
+            <option value="4.1">4.1</option>
+            <option value="5.0">5.0</option>
+            <option value="5.1">5.1</option>
+            <option value="5.2">5.2</option>
+          </select>
+          <span
+            className="ml-1 px-1 rounded bg-gray-800 text-gray-300"
+            title="Expert: profile/level are constraints for decoder compatibility. Tune tweaks encoder for specific content. Leave as auto unless you have a target device."
+          >
+            ?
+          </span>
+        </div>
+      </div>
+    )
+    }
+    </>
   );
 };
 

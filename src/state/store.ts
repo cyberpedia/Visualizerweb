@@ -137,6 +137,16 @@ export type ExportSettings = {
   pixelFormat?: "yuv420p" | "yuv444p";
   parallelWorkers?: number; // number of workers for offline render (1..4)
   encodeProfile?: "fast" | "balanced" | "high";
+  // Expert options
+  tune?: "film" | "animation" | "grain" | "stillimage" | "psnr" | "ssim" | "fastdecode" | "zerolatency";
+  profile?: "baseline" | "main" | "high" | "high444p";
+  level?: "3.0" | "3.1" | "4.0" | "4.1" | "5.0" | "5.1" | "5.2";
+};
+
+export type ExportPreset = {
+  id: string;
+  name: string;
+  settings: Partial<ExportSettings>;
 };
 
 type PlayerState = {
@@ -152,6 +162,7 @@ type PlayerState = {
   canvasEl: HTMLCanvasElement | null;
   exportActive: boolean;
   exportSettings: ExportSettings;
+  exportPresets: ExportPreset[];
 
   // actions
   addTracks: (tracks: Track[]) => void;
@@ -169,6 +180,10 @@ type PlayerState = {
   setCanvasEl: (el: HTMLCanvasElement | null) => void;
   setExportActive: (v: boolean) => void;
   setExportSettings: (s: Partial<ExportSettings>) => void;
+  addExportPreset: (name: string, settings: Partial<ExportSettings>) => void;
+  removeExportPreset: (id: string) => void;
+  renameExportPreset: (id: string, name: string) => void;
+  applyExportPreset: (id: string) => void;
   next: () => void;
   prev: () => void;
 };
@@ -214,8 +229,13 @@ const DEFAULT_EXPORT: ExportSettings = {
   forceCrf: false,
   crf: 23,
   preset: "veryfast",
-  audioBitrateKrmat: "yuv420p",
-  parallelWorkers: 2
+  audioBitrateKbps: 192,
+  pixelFormat: "yuv420p",
+  parallelWorkers: 2,
+  encodeProfile: "balanced",
+  tune: undefined,
+  profile: undefined,
+  level: undefined
 };
 
 export const usePlayerStore = create<PlayerState>()(
@@ -232,6 +252,7 @@ export const usePlayerStore = create<PlayerState>()(
       canvasEl: null,
       exportActive: false,
       exportSettings: DEFAULT_EXPORT,
+      exportPresets: [],
 
       addTracks: (tracks) =>
         set((s) => ({
@@ -287,6 +308,28 @@ export const usePlayerStore = create<PlayerState>()(
       setExportActive: (v) => set(() => ({ exportActive: v })),
       setExportSettings: (patch) =>
         set((s) => ({ exportSettings: { ...s.exportSettings, ...patch } })),
+      addExportPreset: (name, settings) =>
+        set((s) => ({
+          exportPresets: [
+            ...s.exportPresets,
+            { id: crypto.randomUUID(), name, settings }
+          ]
+        })),
+      removeExportPreset: (id) =>
+        set((s) => ({
+          exportPresets: s.exportPresets.filter((p) => p.id !== id)
+        })),
+      renameExportPreset: (id, name) =>
+        set((s) => ({
+          exportPresets: s.exportPresets.map((p) =>
+            p.id === id ? { ...p, name } : p
+          )
+        })),
+      applyExportPreset: (id) =>
+        set((s) => {
+          const p = s.exportPresets.find((pp) => pp.id === id);
+          return p ? { exportSettings: { ...s.exportSettings, ...p.settings } } : {};
+        }),
       next: () => {
         const { playlist, currentIndex } = get();
         if (playlist.length === 0) return;
@@ -308,7 +351,8 @@ export const usePlayerStore = create<PlayerState>()(
         volume: s.volume,
         eqGains: s.eqGains,
         visualizerTemplate: s.visualizerTemplate,
-        exportSettings: s.exportSettings
+        exportSettings: s.exportSettings,
+        exportPresets: s.exportPresets
       })
     }
   )
