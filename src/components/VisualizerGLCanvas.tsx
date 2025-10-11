@@ -813,8 +813,17 @@ void main(){
 
       const tSec = nowSec;
       const layerParticles = new Map<string, { x: number; y: number }[]>();
+      const setBlendForMode = (mode: string | undefined) => {
+        if (mode === "lighter") {
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive
+        } else {
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // default
+        }
+      };
+
       for (const layer of layers as any[]) {
         if (!layer.visible) continue;
+        setBlendForMode(layer.blendMode);
         if (layer.type === "text") {
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);

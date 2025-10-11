@@ -196,6 +196,128 @@ const LayerEditor: React.FC = () => {
               </label>
             </div>
 
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="text-xs">
+                Blend mode
+                <select
+                  value={(layer as any).blendMode || "source-over"}
+                  onChange={(e) => updateLayer(layer.id, { blendMode: e.target.value as any } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                >
+                  <option value="source-over">source-over</option>
+                  <option value="lighter">lighter (add)</option>
+                </select>
+              </label>
+              <label className="text-xs">
+                Shadow color
+                <input
+                  type="color"
+                  value={(layer as any).shadowColor || "#000000"}
+                  onChange={(e) => updateLayer(layer.id, { shadowColor: e.target.value } as any)}
+                />
+              </label>
+              <label className="text-xs">
+                Shadow blur
+                <input
+                  type="number"
+                  value={(layer as any).shadowBlur || 0}
+                  onChange={(e) => updateLayer(layer.id, { shadowBlur: Number(e.target.value) } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="text-xs">
+                Mask
+                <select
+                  value={(layer as any).mask?.type || "none"}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "none") updateLayer(layer.id, { mask: undefined } as any);
+                    else if (val === "rect") updateLayer(layer.id, { mask: { type: "rect", x: layer.x, y: layer.y, width: 100, height: 50 } } as any);
+                    else if (val === "circle") updateLayer(layer.id, { mask: { type: "circle", x: layer.x, y: layer.y, radius: 40 } } as any);
+                  }}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                >
+                  <option value="none">none</option>
+                  <option value="rect">rect</option>
+                  <option value="circle">circle</option>
+                </select>
+              </label>
+              {(layer as any).mask?.type === "rect" && (
+                <>
+                  <label className="text-xs">
+                    Mask X
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.x || 0}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, x: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Mask Y
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.y || 0}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, y: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Width
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.width || 100}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, width: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Height
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.height || 50}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, height: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                </>
+              )}
+              {(layer as any).mask?.type === "circle" && (
+                <>
+                  <label className="text-xs">
+                    Mask X
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.x || 0}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, x: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Mask Y
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.y || 0}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, y: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Radius
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.radius || 40}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, radius: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+
             {layer.type === "text" && (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 <label className="text-xs col-span-2">

@@ -36,6 +36,10 @@ export type ArtistOverlay = {
 export type Easing = "linear" | "easeIn" | "easeOut" | "easeInOut";
 export type KeyframeNumber = { time: number; value: number; easing?: Easing };
 
+export type Mask =
+  | { type: "rect"; x: number; y: number; width: number; height: number }
+  | { type: "circle"; x: number; y: number; radius: number };
+
 export type BaseLayer = {
   id: string;
   type: "text" | "image" | "shape" | "progressRing" | "particles";
@@ -52,6 +56,7 @@ export type BaseLayer = {
   blendMode?: GlobalCompositeOperation;
   shadowColor?: string;
   shadowBlur?: number;
+  mask?: Mask; // optional per-layer mask
   kf?: {
     x?: KeyframeNumber[];
     y?: KeyframeNumber[];

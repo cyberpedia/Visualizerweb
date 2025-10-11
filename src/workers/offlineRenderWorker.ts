@@ -242,6 +242,24 @@ function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: numb
   ctx.translate(-(x + ax), -(y + ay));
 }
 
+function applyMask(ctx: OffscreenCanvasRenderingContext2D, mask?: any) {
+  if (!mask) return;
+  ctx.save();
+  ctx.beginPath();
+  if (mask.type === "rect") {
+    ctx.rect(mask.x, mask.y, mask.width, mask.height);
+  } else if (mask.type === "circle") {
+    ctx.arc(mask.x, mask.y, mask.radius, 0, Math.PI * 2);
+  }
+  ctx.closePath();
+  ctx.clip();
+}
+
+function endMask(ctx: OffscreenCanvasRenderingContext2D, mask?: any) {
+  if (!mask) return;
+  ctx.restore();
+}
+
 function drawWorkerLayers(
   ctx: OffscreenCanvasRenderingContext2D,
   width: number,
@@ -265,6 +283,7 @@ function drawWorkerLayers(
         ctx.save();
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
+        applyMask(ctx, l.mask);
         ctx.fillStyle = l.color;
         ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
         ctx.textAlign = l.align as CanvasTextAlign;
@@ -274,6 +293,7 @@ function drawWorkerLayers(
           (ctx as any).strokeText(l.text, x, y);
         }
         ctx.fillText(l.text, x, y);
+        endMask(ctx, l.mask);
         ctx.restore();
         break;
       }
@@ -295,8 +315,11 @@ function drawWorkerLayers(
           ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
           ctx.closePath();
           ctx.clip();
+        } else {
+          applyMask(ctx, l.mask);
         }
         ctx.drawImage(bmp, x, y, w, h);
+        endMask(ctx, l.mask);
         ctx.restore();
         break;
       }
@@ -308,6 +331,7 @@ function drawWorkerLayers(
         ctx.save();
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
+        applyMask(ctx, l.mask);
         if (l.shape === "rect") {
           const w = l.width ?? 100;
           const h = l.height ?? 50;
@@ -343,6 +367,7 @@ function drawWorkerLayers(
             ctx.stroke();
           }
         }
+        endMask(ctx, l.mask);
         ctx.restore();
         break;
       }
@@ -358,11 +383,13 @@ function drawWorkerLayers(
         ctx.save();
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
+        applyMask(ctx, l.mask);
         ctx.lineWidth = thick;
         ctx.strokeStyle = lerpColor(l.color1, l.color2, t);
         ctx.beginPath();
         ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
         ctx.stroke();
+        endMask(ctx, l.mask);
         ctx.restore();
         break;
       }
@@ -372,6 +399,7 @@ function drawWorkerLayers(
         ctx.save();
         ctx.globalAlpha = l.opacity;
         applyCommon(ctx, l, 0, 0);
+        applyMask(ctx, l.mask);
         ctx.fillStyle = l.color;
         const count = l.count;
         const speed = l.speed * (1 + 0.5 * (beatPulse || 0));
@@ -383,6 +411,7 @@ function drawWorkerLayers(
           ctx.arc(px, py - speed, s, 0, Math.PI * 2);
           ctx.fill();
         }
+        endMask(ctx, l.mask);
         ctx.restore();
         break;
       }

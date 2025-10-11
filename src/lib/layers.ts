@@ -1,4 +1,4 @@
-import { Layer, KeyframeNumber, TemplateConfig } from "../state/store";
+import { Layer, KeyframeNumber, TemplateConfig, Mask } from "../state/store";
 
 function interpKF(kf: KeyframeNumber[] | undefined, t: number, base: number): number {
   if (!kf || kf.length === 0) return base;
@@ -38,6 +38,24 @@ function applyCommon(ctx: CanvasRenderingContext2D, layer: any, x: number, y: nu
   ctx.translate(-(x + ax), -(y + ay));
 }
 
+function applyMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
+  if (!mask) return;
+  ctx.save();
+  ctx.beginPath();
+  if (mask.type === "rect") {
+    ctx.rect(mask.x, mask.y, mask.width, mask.height);
+  } else if (mask.type === "circle") {
+    ctx.arc(mask.x, mask.y, mask.radius, 0, Math.PI * 2);
+  }
+  ctx.closePath();
+  ctx.clip();
+}
+
+function endMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
+  if (!mask) return;
+  ctx.restore();
+}
+
 function drawText(
   ctx: CanvasRenderingContext2D,
   layer: any,
@@ -51,6 +69,7 @@ function drawText(
   ctx.save();
   ctx.globalAlpha = opacity;
   applyCommon(ctx, layer, x, y);
+  applyMask(ctx, layer.mask);
   ctx.fillStyle = layer.color;
   ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
   ctx.textAlign = layer.align;
@@ -60,6 +79,7 @@ function drawText(
     ctx.strokeText(layer.text, x, y);
   }
   ctx.fillText(layer.text, x, y);
+  endMask(ctx, layer.mask);
   ctx.restore();
 }
 
@@ -86,8 +106,11 @@ function drawImage(
     ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
     ctx.closePath();
     ctx.clip();
+  } else {
+    applyMask(ctx, layer.mask);
   }
   ctx.drawImage(img, x, y, w, h);
+  endMask(ctx, layer.mask);
   ctx.restore();
 }
 
@@ -102,6 +125,7 @@ function drawShape(
   ctx.save();
   ctx.globalAlpha = opacity;
   applyCommon(ctx, layer, x, y);
+  applyMask(ctx, layer.mask);
   if (layer.shape === "rect") {
     const w = layer.width ?? 100;
     const h = layer.height ?? 50;
@@ -137,6 +161,7 @@ function drawShape(
       ctx.stroke();
     }
   }
+  endMask(ctx, layer.mask);
   ctx.restore();
 }
 
@@ -168,11 +193,13 @@ function drawProgressRing(
 
   ctx.save();
   ctx.globalAlpha = opacity;
+  applyMask(ctx, layer.mask);
   ctx.lineWidth = thick;
   ctx.strokeStyle = lerpColor(layer.color1, layer.color2, t);
   ctx.beginPath();
   ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
   ctx.stroke();
+  endMask(ctx, layer.mask);
   ctx.restore();
 }
 
@@ -197,6 +224,7 @@ function drawParticles(
 
   ctx.save();
   ctx.globalAlpha = layer.opacity;
+  applyMask(ctx, layer.mask);
   ctx.fillStyle = layer.color;
   const speed = layer.speed * (1 + 0.5 * (beatPulse || 0));
   for (const p of parts) {
@@ -207,6 +235,7 @@ function drawParticles(
     ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
     ctx.fill();
   }
+  endMask(ctx, layer.mask);
   ctx.restore();
 }
 

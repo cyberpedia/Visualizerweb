@@ -39,6 +39,7 @@ Visualizers and overlays
 - Glow/bloom effect on GPU path with adjustable intensity
 - Overlays: album art, title, and artist text
 - Advanced template layers: text, image, shape, progress ring, particles
+- Per-layer blend modes (source-over, additive/lighter) and masks (rect/circle) on Canvas/Offline paths
 - Keyframe timeline for animatable properties (x, y, opacity, size, rotation)
 - Template Gallery with defaults, user presets; template import/export (JSON)
 
