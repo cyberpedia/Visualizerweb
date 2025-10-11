@@ -25,7 +25,8 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
       encodeProfile: "balanced",
       preset: "fast",
       forceCrf: true,
-      crf:ps: 192,
+      crf: 22,
+      audioBitrateKbps: 192,
       pixelFormat: "yuv420p",
       parallelWorkers: 2
     }
@@ -60,7 +61,9 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   {
     name: "Streaming 1080p CBR",
     category: "Streaming",
-    settings    preset: "faster",
+    settings: {
+      mode: "1080p",
+      preset: "faster",
       forceCrf: false,
       bitrate: 8_000_000,
       audioBitrateKbps: 192,
@@ -329,6 +332,7 @@ const ExportPresetsEditor: React.FC = () => {
   const addPreset = usePlayerStore((s) => s.addExportPreset);
   const removePreset = usePlayerStore((s) => s.removeExportPreset);
   const renamePreset = usePlayerStore((s) => s.renameExportPreset);
+  const updatePresetNotes = usePlayerStore((s) => s.updateExportPresetNotes);
   const applyPreset = usePlayerStore((s) => s.applyExportPreset);
   const setExportSettings = usePlayerStore((s) => s.setExportSettings);
   const current = usePlayerStore((s) => s.exportSettings);
@@ -347,6 +351,9 @@ const ExportPresetsEditor: React.FC = () => {
   });
 
   const filteredCustom = presets.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+
+  const isLimited = (s: Partial<ExportSettings>) =>
+    s.pixelFormat === "yuv444p" || s.profile === "high444p";
 
   const saveCurrent = () => {
     const settings: Partial<ExportSettings> = {
@@ -380,7 +387,11 @@ const ExportPresetsEditor: React.FC = () => {
   };
 
   const exportJSON = () => {
-    const json = JSON.stringify({ version: 1, presets: presets.map((p) => ({ name: p.name, settings: p.settings })) }, null, 2);
+    const json = JSON.stringify(
+      { version: 1, presets: presets.map((p) => ({ name: p.name, settings: p.settings, notes: p.notes })) },
+      null,
+      2
+    );
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -395,7 +406,7 @@ const ExportPresetsEditor: React.FC = () => {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const list: Array<{ name: string; settings: Partial<ExportSettings> }> =
+      const list: Array<{ name: string; settings: Partial<ExportSettings>, notes?: string }> =
         Array.isArray(data) ? data :
         Array.isArray(data?.presets) ? data.presets :
         [];
@@ -407,7 +418,8 @@ const ExportPresetsEditor: React.FC = () => {
         if (!item || typeof item !== "object") continue;
         const name = typeof item.name === "string" && item.name.trim().length ? item.name : `Imported ${Date.now()}`;
         const settings = (item.settings && typeof item.settings === "object") ? item.settings : {};
-        addPreset(name, settings);
+        const notes = typeof item.notes === "string" ? item.notes : undefined;
+        addPreset(name, settings, notes);
       }
       setImporting(false);
     } catch {
@@ -444,6 +456,14 @@ const ExportPresetsEditor: React.FC = () => {
             <li key={bp.name} className="flex items-center gap-2">
               <div className="flex-1 text-xs text-gray-200">{bp.name}</div>
               <span className="text-[10px] text-gray-500 px-2 py-0.5 border border-gray-700 rounded">{bp.category ?? "General"}</span>
+              {isLimited(bp.settings) && (
+                <span
+                  className="text-[10px] text-red-300 px-2 py-0.5 border border-red-700 rounded"
+                  title="Limited hardware decoder support; use yuv420p for widest compatibility."
+                >
+                  Limited
+                </span>
+              )}
               <button
                 className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
                 onClick={() => applyBuiltIn(bp)}
@@ -485,34 +505,54 @@ const ExportPresetsEditor: React.FC = () => {
       ) : (
         <ul className="space-y-2">
           {filteredCustom.map((p: ExportPreset) => (
-            <li key={p.id} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={p.name}
-                onChange={(e) => renamePreset(p.id, e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs flex-1"
-              />
-              <button
-                className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
-                onClick={() => applyPreset(p.id)}
-                title="Apply preset"
-              >
-                Apply
-              </button>
-              <button
-                className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
-                onClick={() => addPreset(`Copy of ${p.name}`, p.settings)}
-                title="Duplicate preset"
-              >
-                Duplicate
-              </button>
-              <button
-                className="px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-xs"
-                onClick={() => removePreset(p.id)}
-                title="Delete preset"
-              >
-                Delete
-              </button>
+            <li key={p.id} className="space-y-1">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={p.name}
+                  onChange={(e) => renamePreset(p.id, e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs flex-1"
+                />
+                {isLimited(p.settings) && (
+                  <span
+                    className="text-[10px] text-red-300 px-2 py-0.5 border border-red-700 rounded"
+                    title="Limited hardware decoder support; use yuv420p for widest compatibility."
+                  >
+                    Limited
+                  </span>
+                )}
+                <button
+                  className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+                  onClick={() => applyPreset(p.id)}
+                  title="Apply preset"
+                >
+                  Apply
+                </button>
+                <button
+                  className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+                  onClick={() => addPreset(`Copy of ${p.name}`, p.settings)}
+                  title="Duplicate preset"
+                >
+                  Duplicate
+                </button>
+                <button
+                  className="px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-xs"
+                  onClick={() => removePreset(p.id)}
+                  title="Delete preset"
+                >
+                  Delete
+                </button>
+              </div>
+              <div>
+                <input
+                  type="text"
+                  placeholder="Notes"
+                  value={p.notes ?? ""}
+                  onChange={(e) => updatePresetNotes(p.id, e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] w-full"
+                  title="Optional notes for this preset"
+                />
+              </div>
             </li>
           ))}
         </ul>

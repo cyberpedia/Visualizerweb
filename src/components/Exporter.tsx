@@ -25,6 +25,7 @@ const Exporter: React.FC = () => {
   const addPreset = usePlayerStore((s) => s.addExportPreset);
   const exportPresetsList = usePlayerStore((s) => s.exportPresets);
   const applyExportPresetById = usePlayerStore((s) => s.applyExportPreset);
+  const removeExportPresetById = usePlayerStore((s) => s.removeExportPreset);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [importingJSON, setImportingJSON] = useState(false);
 
@@ -52,7 +53,7 @@ const Exporter: React.FC = () => {
 
   const exportPresetsJSON = () => {
     const json = JSON.stringify(
-      { version: 1, presets: exportPresetsList.map((p) => ({ name: p.name, settings: p.settings })) },
+      { version: 1, presets: exportPresetsList.map((p) => ({ name: p.name, settings: p.settings, notes: p.notes })) },
       null,
       2
     );
@@ -70,7 +71,7 @@ const Exporter: React.FC = () => {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const list: Array<{ name: string; settings: any }> =
+      const list: Array<{ name: string; settings: any, notes?: string }> =
         Array.isArray(data) ? data :
         Array.isArray(data?.presets) ? data.presets :
         [];
@@ -82,7 +83,8 @@ const Exporter: React.FC = () => {
         if (!item || typeof item !== "object") continue;
         const name = typeof item.name === "string" && item.name.trim().length ? item.name : `Imported ${Date.now()}`;
         const settings = (item.settings && typeof item.settings === "object") ? item.settings : {};
-        addPreset(name, settings);
+        const notes = typeof item.notes === "string" ? item.notes : undefined;
+        addPreset(name, settings, notes);
       }
     } catch {
       alert("Failed to import presets JSON.");
@@ -411,6 +413,19 @@ const Exporter: React.FC = () => {
                 title="Duplicate selected preset"
               >
                 Duplicate Selected
+              </button>
+              <button
+                className="px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-xs"
+                disabled={!selectedPresetId}
+                onClick={() => {
+                  if (selectedPresetId) {
+                    removeExportPresetById(selectedPresetId);
+                    setSelectedPresetId("");
+                  }
+                }}
+                title="Remove selected preset"
+              >
+                Remove Selected
               </button>
             </>
           )}

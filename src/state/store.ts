@@ -147,6 +147,7 @@ export type ExportPreset = {
   id: string;
   name: string;
   settings: Partial<ExportSettings>;
+  notes?: string;
 };
 
 type PlayerState = {
@@ -180,9 +181,10 @@ type PlayerState = {
   setCanvasEl: (el: HTMLCanvasElement | null) => void;
   setExportActive: (v: boolean) => void;
   setExportSettings: (s: Partial<ExportSettings>) => void;
-  addExportPreset: (name: string, settings: Partial<ExportSettings>) => void;
+  addExportPreset: (name: string, settings: Partial<ExportSettings>, notes?: string) => void;
   removeExportPreset: (id: string) => void;
   renameExportPreset: (id: string, name: string) => void;
+  updateExportPresetNotes: (id: string, notes: string) => void;
   applyExportPreset: (id: string) => void;
   next: () => void;
   prev: () => void;
@@ -308,11 +310,11 @@ export const usePlayerStore = create<PlayerState>()(
       setExportActive: (v) => set(() => ({ exportActive: v })),
       setExportSettings: (patch) =>
         set((s) => ({ exportSettings: { ...s.exportSettings, ...patch } })),
-      addExportPreset: (name, settings) =>
+      addExportPreset: (name, settings, notes) =>
         set((s) => ({
           exportPresets: [
             ...s.exportPresets,
-            { id: crypto.randomUUID(), name, settings }
+            { id: crypto.randomUUID(), name, settings, notes }
           ]
         })),
       removeExportPreset: (id) =>
@@ -323,6 +325,12 @@ export const usePlayerStore = create<PlayerState>()(
         set((s) => ({
           exportPresets: s.exportPresets.map((p) =>
             p.id === id ? { ...p, name } : p
+          )
+        })),
+      updateExportPresetNotes: (id, notes) =>
+        set((s) => ({
+          exportPresets: s.exportPresets.map((p) =>
+            p.id === id ? { ...p, notes } : p
           )
         })),
       applyExportPreset: (id) =>
