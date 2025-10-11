@@ -2,7 +2,7 @@ import { Visualizer, clear } from "./Base";
 
 const Waveform: Visualizer = {
   draw(frame) {
-    const { ctx, width, height, timeDomain, template, beatPulse } = frame;
+    const { ctx, width, height, timeDomain, template, beatPulse, bpm } = frame;
     clear(frame);
 
     ctx.save();
@@ -32,7 +32,8 @@ const Waveform: Visualizer = {
     if (template.showInfo) {
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText("Waveform", margin, margin + 12);
+      const text = bpm ? `Waveform • BPM ${Math.round(bpm)}` : "Waveform";
+      ctx.fillText(text, margin, margin + 12);
     }
   }
 };

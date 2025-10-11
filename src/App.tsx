@@ -5,6 +5,7 @@ import VisualizerCanvas from "./components/VisualizerCanvas";
 import Equalizer from "./components/Equalizer";
 import TemplateEditor from "./components/TemplateEditor";
 import TemplateGallery from "./components/TemplateGallery";
+import LayerEditor from "./components/LayerEditor";
 import Exporter from "./components/Exporter";
 import FileBrowser from "./components/FileBrowser";
 
@@ -26,25 +27,26 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 grid grid-cols-12 gap-0">
-        <aside className="col-span-3 border-r border-gray-800 bg-gray-900/40">
+      <main className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-0">
+        <aside className="md:col-span-3 border-r md:border-gray-800 bg-gray-900/40">
           <div className="p-3">
             <FileBrowser />
           </div>
           <Playlist />
         </aside>
 
-        <section className="col-span-6 bg-gradient-to-br from-gray-900 via-gray-950 to-black">
+        <section className="md:col-span-6 bg-gradient-to-br from-gray-900 via-gray-950 to-black">
           <VisualizerCanvas />
           <Player />
         </section>
 
-        <aside className="col-span-3 border-l border-gray-800 bg-gray-900/40">
+        <aside className="md:col-span-3 border-l md:border-gray-800 bg-gray-900/40">
           <div className="p-3 border-b border-gray-800">
             <Equalizer />
           </div>
           <TemplateEditor />
           <TemplateGallery />
+          <LayerEditor />
         </aside>
       </main>
     </div>

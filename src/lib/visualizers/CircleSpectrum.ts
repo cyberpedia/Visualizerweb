@@ -13,7 +13,7 @@ function lerpColor(a: string, b: string, t: number) {
 
 const CircleSpectrum: Visualizer = {
   draw(frame) {
-    const { ctx, width, height, freq, template, beatPulse } = frame;
+    const { ctx, width, height, freq, template, beatPulse, bpm } = frame;
     clear(frame);
 
     const centerX = width / 2;
@@ -51,7 +51,8 @@ const CircleSpectrum: Visualizer = {
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto";
       ctx.textAlign = "center";
-      ctx.fillText("Circle Spectrum", width / 2, height - 16);
+      const text = bpm ? `Circle Spectrum • BPM ${Math.round(bpm)}` : "Circle Spectrum";
+      ctx.fillText(text, width / 2, height - 16);
       ctx.textAlign = "start";
     }
   }

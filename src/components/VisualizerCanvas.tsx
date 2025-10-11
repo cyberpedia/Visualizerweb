@@ -4,6 +4,8 @@ import BarSpectrum from "../lib/visualizers/BarSpectrum";
 import CircleSpectrum from "../lib/visualizers/CircleSpectrum";
 import Waveform from "../lib/visualizers/Waveform";
 import { drawOverlays } from "../lib/overlay";
+import { drawLayers } from "../lib/layers";
+import { audioEngine } from "../lib/audio";
 
 const VisualizerCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -61,6 +63,11 @@ const VisualizerCanvas: React.FC = () => {
     const prevArr = new Uint8Array(analyzer.frequencyBinCount);
     let pulse = 0;
 
+    // adaptive threshold data
+    const fluxHist: number[] = [];
+    let lastBeatT = 0;
+    const beatIntervals: number[] = [];
+
     // cache background media for this effect lifecycle
     const bgImg = template.backgroundImageUrl ? new Image() : null;
     if (bgImg) {
@@ -85,24 +92,44 @@ const VisualizerCanvas: React.FC = () => {
       analyzer.getByteFrequencyData(freqArr);
       analyzer.getByteTimeDomainData(timeArr);
 
-      // simple spectral flux-based beat pulse
+      // spectral flux
       let flux = 0;
       for (let i = 0; i < freqArr.length; i++) {
         const diff = freqArr[i] - prevArr[i];
         if (diff > 0) flux += diff;
         prevArr[i] = freqArr[i];
       }
-      const threshold = 1500; // heuristic; can be made adaptive
-      if (flux > threshold) {
+      fluxHist.push(flux);
+      if (fluxHist.length > 120) fluxHist.shift();
+      const mean = fluxHist.reduce((a, b) => a + b, 0) / fluxHist.length;
+      const variance = fluxHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / fluxHist.length;
+      const std = Math.sqrt(variance);
+      const threshold = mean + 1.8 * std;
+
+      const nowSec = audioEngine.getCurrentTime();
+      const minInterval = 0.25; // 240 bpm max
+      if (flux > threshold && nowSec - lastBeatT > minInterval) {
+        if (lastBeatT > 0) {
+          beatIntervals.push(nowSec - lastBeatT);
+          if (beatIntervals.length > 12) beatIntervals.shift();
+        }
+        lastBeatT = nowSec;
         pulse = 1;
       } else {
         pulse *= 0.92;
       }
 
+      const bpm =
+        beatIntervals.length >= 4
+          ? 60 / (beatIntervals.reduce((a, b) => a + b, 0) / beatIntervals.length)
+          : undefined;
+
       // background media support
       const w = exportActive ? canvas.width : canvas.clientWidth;
       const h = exportActive ? canvas.height : canvas.clientHeight;
-      if (bgVideo && bgVideolientHeight;
+      if (bgVideo && bgVideo.readyState >= 2) {
+        ctx.drawImage(bgVideo, 0, 0, w, h);
+      } else if (bgImg && bgImg.complete) {
         ctx.drawImage(bgImg, 0, 0, w, h);
       }
 
@@ -125,6 +152,7 @@ const VisualizerCanvas: React.FC = () => {
         timeDomain: timeArr,
         template,
         beatPulse: pulse,
+        bpm,
         trackInfo: {
           title: currentTrack?.name ?? "",
           artist: currentTrack?.artist ?? ""
@@ -143,6 +171,10 @@ const VisualizerCanvas: React.FC = () => {
           artUrl: currentTrack?.artUrl || null
         }
       );
+
+      // layers: advanced visuals
+      const duration = audioEngine.getDuration() || currentTrack?.duration || 0;
+      drawLayers(ctx, drawW, drawH, template, nowSec, duration, pulse);
 
       raf = requestAnimationFrame(draw);
     };

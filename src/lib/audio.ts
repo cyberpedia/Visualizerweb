@@ -90,6 +90,14 @@ export class AudioEngine {
     return this.streamDest?.stream ?? null;
   }
 
+  getCurrentTime(): number {
+    return this.audioEl?.currentTime ?? 0;
+  }
+
+  getDuration(): number {
+    return this.audioEl?.duration ?? 0;
+  }
+
   createEqNodes() {
     const ctx = this.ensureCtx();
     const frequencies = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];

@@ -9,6 +9,7 @@ export type VisualizerFrame = {
   timeDomain: Uint8Array;
   template: TemplateConfig;
   beatPulse: number; // 0..1, rises on beat and decays
+  bpm?: number;
   trackInfo?: {
     title?: string;
     artist?: string;

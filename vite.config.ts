@@ -15,7 +15,20 @@ export default defineConfig({
         theme_color: "#111827",
         background_color: "#0b1020",
         display: "standalone",
-        icons: []
+        icons: [
+          {
+            src: "https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/spotify.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+            purpose: "any"
+          },
+          {
+            src: "https://raw.githubusercontent.com/primer/octicons/main/icons/play-24.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+            purpose: "maskable"
+          }
+        ]
       }
     })
   ],

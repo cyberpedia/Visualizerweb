@@ -13,7 +13,7 @@ function lerpColor(a: string, b: string, t: number) {
 
 const BarSpectrum: Visualizer = {
   draw(frame) {
-    const { ctx, width, height, freq, template, beatPulse } = frame;
+    const { ctx, width, height, freq, template, beatPulse, bpm } = frame;
     clear(frame);
 
     const bars = template.barCount ?? 64;
@@ -42,7 +42,8 @@ const BarSpectrum: Visualizer = {
     if (template.showInfo) {
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto";
-      ctx.fillText("Bar Spectrum", margin, margin + 12);
+      const text = bpm ? `Bar Spectrum • BPM ${Math.round(bpm)}` : "Bar Spectrum";
+      ctx.fillText(text, margin, margin + 12);
     }
   }
 };

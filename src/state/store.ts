@@ -31,6 +31,71 @@ export type ArtistOverlay = {
   align: "left" | "center" | "right";
 };
 
+export type Easing = "linear" | "easeIn" | "easeOut" | "easeInOut";
+export type KeyframeNumber = { time: number; value: number; easing?: Easing };
+
+export type BaseLayer = {
+  id: string;
+  type: "text" | "image" | "shape" | "progressRing" | "particles";
+  visible: boolean;
+  zIndex: number;
+  x: number;
+  y: number;
+  opacity: number;
+  kf?: {
+    x?: KeyframeNumber[];
+    y?: KeyframeNumber[];
+    opacity?: KeyframeNumber[];
+    size?: KeyframeNumber[];
+    rotation?: KeyframeNumber[];
+  };
+};
+
+export type TextLayer = BaseLayer & {
+  type: "text";
+  text: string;
+  color: string;
+  size: number;
+  align: "left" | "center" | "right";
+};
+
+export type ImageLayer = BaseLayer & {
+  type: "image";
+  src: string;
+  width: number;
+  height: number;
+  clipCircle?: boolean;
+};
+
+export type ShapeLayer = BaseLayer & {
+  type: "shape";
+  shape: "rect" | "circle";
+  width?: number;
+  height?: number;
+  radius?: number;
+  fillColor: string;
+  strokeColor?: string;
+  strokeWidth?: number;
+};
+
+export type ProgressRingLayer = BaseLayer & {
+  type: "progressRing";
+  radius: number;
+  thickness: number;
+  color1: string;
+  color2: string;
+};
+
+export type ParticlesLayer = BaseLayer & {
+  type: "particles";
+  count: number;
+  size: number;
+  speed: number;
+  color: string;
+};
+
+export type Layer = TextLayer | ImageLayer | ShapeLayer | ProgressRingLayer | ParticlesLayer;
+
 export type TemplateConfig = {
   type: VisualizerType;
   color1: string;
@@ -53,6 +118,7 @@ export type TemplateConfig = {
   };
   titleOverlay?: TitleOverlay;
   artistOverlay?: ArtistOverlay;
+  layers?: Layer[];
 };
 
 export type ExportSettings = {
@@ -87,6 +153,9 @@ type PlayerState = {
   setEqGain: (band: number, db: number) => void;
   setAnalyzer: (an: AnalyserNode | null) => void;
   setTemplate: (t: Partial<TemplateConfig>) => void;
+  addLayer: (layer: Layer) => void;
+  updateLayer: (id: string, patch: Partial<Layer>) => void;
+  removeLayer: (id: string) => void;
   setCanvasEl: (el: HTMLCanvasElement | null) => void;
   setExportActive: (v: boolean) => void;
   setExportSettings: (s: Partial<ExportSettings>) => void;
@@ -123,7 +192,8 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
     x: 20,
     y: 50,
     align: "left"
-  }
+  },
+  layers: []
 };
 
 const DEFAULT_EXPORT: ExportSettings = {
@@ -174,6 +244,29 @@ export const usePlayerStore = create<PlayerState>()(
       setAnalyzer: (an) => set(() => ({ analyzer: an })),
       setTemplate: (t) =>
         set((s) => ({ visualizerTemplate: { ...s.visualizerTemplate, ...t } })),
+      addLayer: (layer) =>
+        set((s) => ({
+          visualizerTemplate: {
+            ...s.visualizerTemplate,
+            layers: [...(s.visualizerTemplate.layers ?? []), layer]
+          }
+        })),
+      updateLayer: (id, patch) =>
+        set((s) => ({
+          visualizerTemplate: {
+            ...s.visualizerTemplate,
+            layers: (s.visualizerTemplate.layers ?? []).map((l) =>
+              l.id === id ? { ...l, ...patch } : l
+            )
+          }
+        })),
+      removeLayer: (id) =>
+        set((s) => ({
+          visualizerTemplate: {
+            ...s.visualizerTemplate,
+            layers: (s.visualizerTemplate.layers ?? []).filter((l) => l.id !== id)
+          }
+        })),
       setCanvasEl: (el) => set(() => ({ canvasEl: el })),
       setExportActive: (v) => set(() => ({ exportActive: v })),
       setExportSettings: (patch) =>
