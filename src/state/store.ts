@@ -143,6 +143,7 @@ export type ExportSettings = {
   bitrate: number; // bits per second (used when CRF unset)
   engine?: "realtime" | "offline"; // realtime MediaRecorder(WebM) or offline ffmpeg.wasm(MP4)
   outputType?: "video" | "audio"; // audio-only export option
+  pitchSemitones?: number; // offline pitch shift (semitones)
   // Encoding options (offline engine)
   forceCrf?: boolean;
   crf?: number; // 0..51, lower = higher quality

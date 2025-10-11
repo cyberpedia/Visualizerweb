@@ -815,6 +815,11 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     if (audio) {
       argsAudio.push("-i", audio.name);
       argsAudio.push("-vn");
+      const semis = (opts as any).pitchSemitones;
+      if (typeof semis === "number" && decoded) {
+        const factor = Math.pow(2, semis / 12);
+        argsAudio.push("-filter:a", `asetrate=${Math.round(decoded.sampleRate * factor)},atempo=${(1 / factor).toFixed(4)}`);
+      }
       argsAudio.push("-c:a", "aac");
       const abps = String(((opts.encode?.audioBitrateKbps ?? 192) * 1000) | 0);
       argsAudio.push("-b:a", abps);
@@ -865,6 +870,11 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
   if (tune) args.push("-tune", tune);
 
   if (audio) {
+    const semis = (opts as any).pitchSemitones;
+    if (typeof semis === "number" && decoded) {
+      const factor = Math.pow(2, semis / 12);
+      args.push("-filter:a", `asetrate=${Math.round(decoded.sampleRate * factor)},atempo=${(1 / factor).toFixed(4)}`);
+    }
     args.push("-c:a", "aac");
     const abps = String(((opts.encode?.audioBitrateKbps ?? 192) * 1000) | 0);
     args.push("-b:a", abps);
