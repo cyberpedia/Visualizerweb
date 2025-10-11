@@ -24,6 +24,8 @@ const Exporter: React.FC = () => {
 
   const addPreset = usePlayerStore((s) => s.addExportPreset);
   const exportPresetsList = usePlayerStore((s) => s.exportPresets);
+  const applyExportPresetById = usePlayerStore((s) => s.applyExportPreset);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [importingJSON, setImportingJSON] = useState(false);
 
   const quickSavePreset = () => {
@@ -380,6 +382,38 @@ const Exporter: React.FC = () => {
           >
             {showPlatformTips ? "Hide Tips" : "Platform Tips"}
           </button>
+
+          {/* Custom presets quick apply/duplicate */}
+          {exportPresetsList.length > 0 && (
+            <>
+              <select
+                className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                value={selectedPresetId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedPresetId(id);
+                  if (id) applyExportPresetById(id);
+                }}
+                title="Custom presets"
+              >
+                <option value="">(select preset)</option>
+                {exportPresetsList.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <button
+                className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+                disabled={!selectedPresetId}
+                onClick={() => {
+                  const p = exportPresetsList.find((pp) => pp.id === selectedPresetId);
+                  if (p) addPreset(`Copy of ${p.name}`, p.settings);
+                }}
+                title="Duplicate selected preset"
+              >
+                Duplicate Selected
+              </button>
+            </>
+          )}
         </>
       )}
 

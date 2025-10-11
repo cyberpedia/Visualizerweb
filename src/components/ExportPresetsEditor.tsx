@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { usePlayerStore, ExportPreset, ExportSettings } from "../state/store";
 
-type BuiltIn = { name: string; settings: Partial<ExportSettings> };
+type BuiltIn = { name: string; settings: Partial<ExportSettings>; category?: string };
 
 const BUILT_IN_PRESETS: BuiltIn[] = [
   {
     name: "Fast",
+    category: "General",
     settings: {
       encodeProfile: "fast",
       preset: "veryfast",
@@ -19,18 +20,19 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Balanced",
+    category: "General",
     settings: {
       encodeProfile: "balanced",
       preset: "fast",
       forceCrf: true,
-      crf: 22,
-      audioBitrateKbps: 192,
+      crf:ps: 192,
       pixelFormat: "yuv420p",
       parallelWorkers: 2
     }
   },
   {
     name: "High Quality",
+    category: "General",
     settings: {
       encodeProfile: "high",
       preset: "slow",
@@ -44,6 +46,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Mobile 720p",
+    category: "Mobile",
     settings: {
       mode: "720p",
       preset: "fast",
@@ -56,9 +59,8 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Streaming 1080p CBR",
-    settings: {
-      mode: "1080p",
-      preset: "faster",
+    category: "Streaming",
+    settings    preset: "faster",
       forceCrf: false,
       bitrate: 8_000_000,
       audioBitrateKbps: 192,
@@ -71,6 +73,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   // Additional built-ins
   {
     name: "4K 2160p (60fps)",
+    category: "YouTube",
     settings: {
       mode: "custom",
       width: 3840,
@@ -89,6 +92,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "YouTube 1080p (Film)",
+    category: "YouTube",
     settings: {
       mode: "1080p",
       fps: 30,
@@ -105,6 +109,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Instagram Square 1080×1080",
+    category: "Instagram",
     settings: {
       mode: "custom",
       width: 1080,
@@ -122,6 +127,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Instagram Square 1080×1080 (60fps)",
+    category: "Instagram",
     settings: {
       mode: "custom",
       width: 1080,
@@ -139,6 +145,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "TikTok Vertical 1080×1920",
+    category: "TikTok",
     settings: {
       mode: "custom",
       width: 1080,
@@ -156,6 +163,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "TikTok Vertical 1080×1920 (60fps)",
+    category: "TikTok",
     settings: {
       mode: "custom",
       width: 1080,
@@ -173,6 +181,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Instagram Reels 720×1280",
+    category: "Instagram",
     settings: {
       mode: "custom",
       width: 720,
@@ -190,6 +199,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "YouTube Shorts 1080×1920 (60fps)",
+    category: "YouTube",
     settings: {
       mode: "custom",
       width: 1080,
@@ -208,6 +218,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Twitter Square 720×720 (CBR)",
+    category: "Twitter",
     settings: {
       mode: "custom",
       width: 720,
@@ -225,6 +236,7 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
   },
   {
     name: "Twitter 720p CBR",
+    category: "Twitter",
     settings: {
       mode: "720p",
       fps: 30,
@@ -236,6 +248,78 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
       profile: "high",
       level: "3.1",
       parallelWorkers: 2
+    }
+  },
+  {
+    name: "Instagram Reels 4K 2160×3840 (vertical)",
+    category: "Instagram",
+    settings: {
+      mode: "custom",
+      width: 2160,
+      height: 3840,
+      fps: 30,
+      preset: "medium",
+      forceCrf: true,
+      crf: 20,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "5.1",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "YouTube 4K 2160p (60fps)",
+    category: "YouTube",
+    settings: {
+      mode: "custom",
+      width: 3840,
+      height: 2160,
+      fps: 60,
+      preset: "slow",
+      forceCrf: true,
+      crf: 20,
+      audioBitrateKbps: 320,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "5.1",
+      tune: "film",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "YouTube HDR-like 1080p",
+    category: "YouTube",
+    settings: {
+      mode: "1080p",
+      fps: 30,
+      preset: "slow",
+      forceCrf: true,
+      crf: 18,
+      audioBitrateKbps: 320,
+      pixelFormat: "yuv444p",
+      profile: "high444p",
+      level: "4.1",
+      tune: "film",
+      parallelWorkers: 1
+    }
+  },
+  {
+    name: "Instagram HDR-like Vertical 1080×1920",
+    category: "Instagram",
+    settings: {
+      mode: "custom",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      preset: "slow",
+      forceCrf: true,
+      crf: 18,
+      audioBitrateKbps: 256,
+      pixelFormat: "yuv444p",
+      profile: "high444p",
+      level: "4.1",
+      parallelWorkers: 1
     }
   }
 ];
@@ -251,6 +335,18 @@ const ExportPresetsEditor: React.FC = () => {
 
   const [newName, setNewName] = useState("");
   const [importing, setImporting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
+
+  const categories = ["All", "General", "YouTube", "Instagram", "TikTok", "Twitter", "Streaming", "Mobile"];
+
+  const filteredBuiltIns = BUILT_IN_PRESETS.filter((bp) => {
+    const matchesSearch = bp.name.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = category === "All" || (bp.category ?? "General") === category;
+    return matchesSearch && matchesCategory;
+  });
+
+  const filteredCustom = presets.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
 
   const saveCurrent = () => {
     const settings: Partial<ExportSettings> = {
@@ -323,11 +419,31 @@ const ExportPresetsEditor: React.FC = () => {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded p-3 text-sm">
       <div className="mb-3">
-        <div className="text-xs text-gray-300 mb-1">Built-in presets (read-only)</div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="text-xs text-gray-300">Built-in presets (read-only)</div>
+          <input
+            type="text"
+            placeholder="Search presets"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs flex-1"
+          />
+          <select
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            title="Filter by category"
+          >
+            {categories.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
         <ul className="space-y-2">
-          {BUILT_IN_PRESETS.map((bp) => (
+          {filteredBuiltIns.map((bp) => (
             <li key={bp.name} className="flex items-center gap-2">
               <div className="flex-1 text-xs text-gray-200">{bp.name}</div>
+              <span className="text-[10px] text-gray-500 px-2 py-0.5 border border-gray-700 rounded">{bp.category ?? "General"}</span>
               <button
                 className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
                 onClick={() => applyBuiltIn(bp)}
@@ -364,11 +480,11 @@ const ExportPresetsEditor: React.FC = () => {
         </button>
       </div>
 
-      {presets.length === 0 ? (
+      {filteredCustom.length === 0 ? (
         <div className="text-gray-400 text-xs">No custom presets yet. Create one from current settings or clone a built-in.</div>
       ) : (
         <ul className="space-y-2">
-          {presets.map((p: ExportPreset) => (
+          {filteredCustom.map((p: ExportPreset) => (
             <li key={p.id} className="flex items-center gap-2">
               <input
                 type="text"
