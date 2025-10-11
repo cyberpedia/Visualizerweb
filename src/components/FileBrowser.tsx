@@ -55,7 +55,8 @@ const FileBrowser: React.FC = () => {
             artist: meta.artist,
             album: meta.album,
             duration: meta.duration,
-            artUrl: meta.artUrl || null
+            artUrl: meta.artUrl || null,
+            file
           });
         } else if (handle.kind === "directory") {
           await collectFromDir(handle);

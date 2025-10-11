@@ -1,10 +1,5 @@
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
 import { Track, TemplateConfig } from "../state/store";
-import BarSpectrum from "./visualizers/BarSpectrum";
-import CircleSpectrum from "./visualizers/CircleSpectrum";
-import Waveform from "./visualizers/Waveform";
-import { drawOverlays } from "./overlay";
-import { drawLayers } from "./layers";
 
 /**
  * Locked-step offline export:
@@ -232,33 +227,44 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
   let lastBeatT = 0;
   let pulse = 0;
 
-  // Worker-based analysis + OffscreenCanvas rendering
-  const N = 1024; // FFT/time-domain window
+  // Full worker-side rendering and analysis (OffscreenCanvas + ImageBitmap)
+  const N = 1024; // analysis window size
 
-  // Use OffscreenCanvas for faster PNG conversion if available
-  const useOffscreen = typeof OffscreenCanvas !== "undefined";
-  const offscreen = useOffscreen ? new OffscreenCanvas(width, height) : null;
-  const renderCtx = useOffscreen ? (offscreen as OffscreenCanvas).getContext("2d")! : ctx;
+  // Helper to fetch image bytes
+  const fetchImageBytes = async (url: string | null | undefined): Promise<Uint8Array | null> => {
+    if (!url) return null;
+    try {
+      const res = await fetch(url);
+      const buf = await res.arrayBuffer();
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
+  };
 
-  // Ensure render context is reset
-  renderCtx.setTransform(1, 0, 0, 1, 0, 0);
+  // Prepare assets (background, album art, image layers)
+  const bgBytes = await fetchImageBytes(template.backgroundImageUrl);
+  const artBytes = await fetchImageBytes(track?.artUrl || null);
+  const layerBytes: { id: string; bytes: ArrayBuffer }[] = [];
+  for (const l of (template.layers ?? [])) {
+    if ((l as any).type === "image" && (l as any).src) {
+      const b = await fetchImageBytes((l as any).src);
+      if (b) layerBytes.push({ id: (l as any).id, bytes: b.buffer });
+    }
+  }
 
-  // spawn analysis worker if we have decoded PCM
+  // Spawn worker
   let worker: Worker | null = null;
   if (decoded) {
-    worker = new Worker(new URL("../workers/audioAnalysisWorker.ts", import.meta.url), { type: "module" });
+    worker = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
   }
 
   // Abort handling
   let aborted = false;
   const abort = () => {
     aborted = true;
-    try {
-      worker?.postMessage({ type: "abort" });
-    } catch {}
-    try {
-      worker?.terminate();
-    } catch {}
+    try { worker?.postMessage({ type: "abort" }); } catch {}
+    try { worker?.terminate(); } catch {}
   };
   if (signal) {
     const onAbort = () => abort();
@@ -266,99 +272,54 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     else signal.addEventListener("abort", onAbort, { once: true });
   }
 
-  async function drawFrame(index: number, tSec: number, freq: Uint8Array, timeDomain: Uint8Array, beatPulse: number, bpm?: number) {
-    // clear / background
-    renderCtx.clearRect(0, 0, width, height);
-    if (bgImg && bgImg.complete) {
-      renderCtx.drawImage(bgImg, 0, 0, width, height);
-    } else {
-      const bg = template.background ?? "#0b1020";
-      renderCtx.fillStyle = bg;
-      renderCtx.fillRect(0, 0, width, height);
-    }
-
-    // choose visualizer
-    const vis =
-      template.type === "bars" ? BarSpectrum :
-      template.type === "circle" ? CircleSpectrum :
-      Waveform;
-
-    vis.draw({
-      ctx: renderCtx as unknown as CanvasRenderingContext2D,
-      width,
-      height,
-      time: tSec,
-      freq,
-      timeDomain,
-      template,
-      beatPulse,
-      bpm,
-      trackInfo: {
-        title: track?.name ?? "",
-        artist: track?.artist ?? ""
-      }
-    });
-
-    // overlays and layers
-    drawOverlays(renderCtx as unknown as CanvasRenderingContext2D, width, height, template, {
-      title: track?.name ?? "",
-      artist: track?.artist ?? "",
-      artUrl: track?.artUrl || null
-    });
-    drawLayers(renderCtx as unknown as CanvasRenderingContext2D, width, height, template, tSec, durationSec || 0, beatPulse);
-
-    // write frame to ffmpeg fs
-    const name = `frame_${String(index + 1).padStart(5, "0")}.png`;
-    let pngBytes: Uint8Array;
-    if (useOffscreen && offscreen) {
-      const blob = await offscreen.convertToBlob({ type: "image/png" });
-      const ab = await blob.arrayBuffer();
-      pngBytes = new Uint8Array(ab);
-    } else {
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        (renderCtx.canvas as HTMLCanvasElement).toBlob((b) => {
-          if (!b) reject(new Error("toBlob failed"));
-          else resolve(b);
-        }, "image/png");
-      });
-      const ab = await blob.arrayBuffer();
-      pngBytes = new Uint8Array(ab);
-    }
-    ffmpeg.FS("writeFile", name, pngBytes);
-
-    if (onProgress) onProgress(index / frameCount, "capture");
-  }
-
   if (!decoded) {
-    // No PCM, fallback to minimal frames (e.g., 10s)
+    // Minimal fallback: solid background frames
     for (let i = 0; i < frameCount; i++) {
       if (aborted) throw new Error("aborted");
-      const tSec = i / fps;
-      const timeDomain = new Uint8Array(N);
-      const freq = new Uint8Array(N >> 1);
-      await drawFrame(i, tSec, freq, timeDomain, 0);
+      const name = `frame_${String(i + 1).padStart(5, "0")}.png`;
+      const bg = template.background ?? "#0b1020";
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, width, height);
+      const blob: Blob = await new Promise((resolve) => (canvas as HTMLCanvasElement).toBlob((b) => resolve(b!), "image/png"));
+      const ab = await blob.arrayBuffer();
+      ffmpeg.FS("writeFile", name, new Uint8Array(ab));
+      if (onProgress) onProgress(i / frameCount, "capture");
     }
   } else {
-    // Stream analysis results from worker
-    const { pcm, sampleRate } = decoded;
-    worker!.postMessage(
-      { type: "init", pcm: pcm.buffer, sampleRate, fps, frameCount, windowSize: N },
-      [pcm.buffer]
-    );
+    // Initialize worker and stream frames
+    const initMsg = {
+      type: "init",
+      pcm: decoded.pcm.buffer,
+      sampleRate: decoded.sampleRate,
+      fps,
+      frameCount,
+      windowSize: N,
+      width,
+      height,
+      template,
+      track: { title: track?.name ?? "", artist: track?.artist ?? "" },
+      assets: {
+        bg: bgBytes ? bgBytes.buffer : undefined,
+        art: artBytes ? artBytes.buffer : undefined,
+        layers: layerBytes.length ? layerBytes : undefined
+      }
+    } as any;
+
+    worker!.postMessage(initMsg, [
+      decoded.pcm.buffer,
+      ...(bgBytes ? [bgBytes.buffer] : []),
+      ...(artBytes ? [artBytes.buffer] : []),
+      ...layerBytes.map((l) => l.bytes)
+    ]);
 
     await new Promise<void>((resolve, reject) => {
-      worker!.onmessage = async (ev: MessageEvent<any>) => {
+      worker!.onmessage = (ev: MessageEvent<any>) => {
         const msg = ev.data;
-        if (msg.type === "frame") {
+        if (msg.type === "frameBytes") {
           if (aborted) { reject(new Error("aborted")); return; }
-          const freq = new Uint8Array(msg.freq);
-          const timeDomain = new Uint8Array(msg.time);
-          try {
-            await drawFrame(msg.index, msg.timeSec, freq, timeDomain, msg.beatPulse, msg.bpm);
-          } catch (e) {
-            reject(e);
-            return;
-          }
+          const name = `frame_${String(msg.index + 1).padStart(5, "0")}.png`;
+          ffmpeg.FS("writeFile", name, new Uint8Array(msg.bytes));
+          if (onProgress) onProgress(msg.index / frameCount, "capture");
         } else if (msg.type === "done") {
           resolve();
         }
@@ -368,9 +329,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       };
     });
 
-    try {
-      worker!.terminate();
-    } catch {}
+    try { worker!.terminate(); } catch {}
   }
 
   // Write audio if available
