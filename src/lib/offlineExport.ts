@@ -232,66 +232,50 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
   let lastBeatT = 0;
   let pulse = 0;
 
-  // Per-frame rendering
+  // Worker-based analysis + OffscreenCanvas rendering
   const N = 1024; // FFT/time-domain window
-  for (let i = 0; i < frameCount; i++) {
-    if (signal?.aborted) throw new Error("aborted");
-    const tSec = i / fps;
 
+  // Use OffscreenCanvas for faster PNG conversion if available
+  const useOffscreen = typeof OffscreenCanvas !== "undefined";
+  const offscreen = useOffscreen ? new OffscreenCanvas(width, height) : null;
+  const renderCtx = useOffscreen ? (offscreen as OffscreenCanvas).getContext("2d")! : ctx;
+
+  // Ensure render context is reset
+  renderCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // spawn analysis worker if we have decoded PCM
+  let worker: Worker | null = null;
+  if (decoded) {
+    worker = new Worker(new URL("../workers/audioAnalysisWorker.ts", import.meta.url), { type: "module" });
+  }
+
+  // Abort handling
+  let aborted = false;
+  const abort = () => {
+    aborted = true;
+    try {
+      worker?.postMessage({ type: "abort" });
+    } catch {}
+    try {
+      worker?.terminate();
+    } catch {}
+  };
+  if (signal) {
+    const onAbort = () => abort();
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  async function drawFrame(index: number, tSec: number, freq: Uint8Array, timeDomain: Uint8Array, beatPulse: number, bpm?: number) {
     // clear / background
-    ctx.clearRect(0, 0, width, height);
+    renderCtx.clearRect(0, 0, width, height);
     if (bgImg && bgImg.complete) {
-      ctx.drawImage(bgImg, 0, 0, width, height);
+      renderCtx.drawImage(bgImg, 0, 0, width, height);
     } else {
       const bg = template.background ?? "#0b1020";
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, width, height);
+      renderCtx.fillStyle = bg;
+      renderCtx.fillRect(0, 0, width, height);
     }
-
-    // synth arrays
-    let timeDomain = new Uint8Array(N);
-    let freq = new Uint8Array(N >> 1);
-
-    if (decoded) {
-      const win = getWindow(decoded.pcm, decoded.sampleRate, tSec, N);
-      timeDomain = computeTimeDomainUint8(win);
-      freq = computeSpectrumUint8(win);
-
-      // beat detection via spectral flux
-      let flux = 0;
-      if (prevMag) {
-        const half = freq.length;
-        for (let k = 0; k < half; k++) {
-          const mag = freq[k];
-          const diff = mag - prevMag[k];
-          if (diff > 0) flux += diff;
-          prevMag[k] = mag;
-        }
-        fluxHist.push(flux);
-        if (fluxHist.length > 120) fluxHist.shift();
-        const mean = fluxHist.reduce((a, b) => a + b, 0) / fluxHist.length;
-        const variance = fluxHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / fluxHist.length;
-        const std = Math.sqrt(variance);
-        const threshold = mean + 1.8 * std;
-
-        const minInterval = 0.25;
-        if (flux > threshold && tSec - lastBeatT > minInterval) {
-          if (lastBeatT > 0) {
-            beatIntervals.push(tSec - lastBeatT);
-            if (beatIntervals.length > 12) beatIntervals.shift();
-          }
-          lastBeatT = tSec;
-          pulse = 1;
-        } else {
-          pulse *= 0.92;
-        }
-      }
-    }
-
-    const bpm =
-      beatIntervals.length >= 4
-        ? 60 / (beatIntervals.reduce((a, b) => a + b, 0) / beatIntervals.length)
-        : undefined;
 
     // choose visualizer
     const vis =
@@ -299,16 +283,15 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       template.type === "circle" ? CircleSpectrum :
       Waveform;
 
-    // draw visualizer
     vis.draw({
-      ctx,
+      ctx: renderCtx as unknown as CanvasRenderingContext2D,
       width,
       height,
       time: tSec,
       freq,
       timeDomain,
       template,
-      beatPulse: pulse,
+      beatPulse,
       bpm,
       trackInfo: {
         title: track?.name ?? "",
@@ -316,22 +299,78 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       }
     });
 
-    // overlays
-    drawOverlays(ctx, width, height, template, {
+    // overlays and layers
+    drawOverlays(renderCtx as unknown as CanvasRenderingContext2D, width, height, template, {
       title: track?.name ?? "",
       artist: track?.artist ?? "",
       artUrl: track?.artUrl || null
     });
-
-    // layers
-    drawLayers(ctx, width, height, template, tSec, durationSec || 0, pulse);
+    drawLayers(renderCtx as unknown as CanvasRenderingContext2D, width, height, template, tSec, durationSec || 0, beatPulse);
 
     // write frame to ffmpeg fs
-    const name = `frame_${String(i + 1).padStart(5, "0")}.png`;
-    const png = await toPNGBytes(canvas);
-    ffmpeg.FS("writeFile", name, png);
+    const name = `frame_${String(index + 1).padStart(5, "0")}.png`;
+    let pngBytes: Uint8Array;
+    if (useOffscreen && offscreen) {
+      const blob = await offscreen.convertToBlob({ type: "image/png" });
+      const ab = await blob.arrayBuffer();
+      pngBytes = new Uint8Array(ab);
+    } else {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        (renderCtx.canvas as HTMLCanvasElement).toBlob((b) => {
+          if (!b) reject(new Error("toBlob failed"));
+          else resolve(b);
+        }, "image/png");
+      });
+      const ab = await blob.arrayBuffer();
+      pngBytes = new Uint8Array(ab);
+    }
+    ffmpeg.FS("writeFile", name, pngBytes);
 
-    if (onProgress) onProgress(i / frameCount, "capture");
+    if (onProgress) onProgress(index / frameCount, "capture");
+  }
+
+  if (!decoded) {
+    // No PCM, fallback to minimal frames (e.g., 10s)
+    for (let i = 0; i < frameCount; i++) {
+      if (aborted) throw new Error("aborted");
+      const tSec = i / fps;
+      const timeDomain = new Uint8Array(N);
+      const freq = new Uint8Array(N >> 1);
+      await drawFrame(i, tSec, freq, timeDomain, 0);
+    }
+  } else {
+    // Stream analysis results from worker
+    const { pcm, sampleRate } = decoded;
+    worker!.postMessage(
+      { type: "init", pcm: pcm.buffer, sampleRate, fps, frameCount, windowSize: N },
+      [pcm.buffer]
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      worker!.onmessage = async (ev: MessageEvent<any>) => {
+        const msg = ev.data;
+        if (msg.type === "frame") {
+          if (aborted) { reject(new Error("aborted")); return; }
+          const freq = new Uint8Array(msg.freq);
+          const timeDomain = new Uint8Array(msg.time);
+          try {
+            await drawFrame(msg.index, msg.timeSec, freq, timeDomain, msg.beatPulse, msg.bpm);
+          } catch (e) {
+            reject(e);
+            return;
+          }
+        } else if (msg.type === "done") {
+          resolve();
+        }
+      };
+      worker!.onerror = (err) => {
+        reject(err instanceof Error ? err : new Error("worker error"));
+      };
+    });
+
+    try {
+      worker!.terminate();
+    } catch {}
   }
 
   // Write audio if available
