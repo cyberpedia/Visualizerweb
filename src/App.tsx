@@ -1,7 +1,9 @@
 import React from "react";
+import { usePlayerStore } from "./state/store";
 import Playlist from "./components/Playlist";
 import Player from "./components/Player";
 import VisualizerCanvas from "./components/VisualizerCanvas";
+import VisualizerGLCanvas from "./components/VisualizerGLCanvas";
 import Equalizer from "./components/Equalizer";
 import TemplateEditor from "./components/TemplateEditor";
 import TemplateGallery from "./components/TemplateGallery";
@@ -12,6 +14,8 @@ import FileBrowser from "./components/FileBrowser";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 
 export default function App() {
+  const renderer = usePlayerStore((s) => s.visualizerTemplate.renderer ?? "canvas2d");
+
   return (
     <div className="h-full w-full flex flex-col">
       <header className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
@@ -39,7 +43,7 @@ export default function App() {
         </aside>
 
         <section className="md:col-span-6 bg-gradient-to-br from-gray-900 via-gray-950 to-black">
-          <VisualizerCanvas />
+          {renderer === "webgl" ? <VisualizerGLCanvas /> : <VisualizerCanvas />}
           <Player />
         </section>
 

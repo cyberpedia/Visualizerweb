@@ -111,6 +111,7 @@ export type Layer = TextLayer | ImageLayer | ShapeLayer | ProgressRingLayer | Pa
 
 export type TemplateConfig = {
   type: VisualizerType;
+  renderer?: "canvas2d" | "webgl";
   color1: string;
   color2: string;
   background?: string | null;

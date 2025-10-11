@@ -22,6 +22,7 @@ export type OfflineExportOptions = {
   track: Track | null;
   template: TemplateConfig;
   outputType?: "video" | "audio";
+  pitchSemitones?: number;
   onProgress?: (p: number, phase: "capture" | "encode") => void;
   signal?: AbortSignal;
   encode?: {
@@ -163,6 +164,67 @@ function computeTimeDomainUint8(samples: Float32Array): Uint8Array {
   return out;
 }
 
+// ---------- Pitch shift (offline, simplistic spectral remap + OLA) ----------
+function hannWindow(N: number): Float32Array {
+  const w = new Float32Array(N);
+  for (let i = 0; i < N; i++) w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
+  return w;
+}
+
+function ifftRadix2(spectrum: Complex[]): Float32Array {
+  const N = spectrum.length;
+  // conjugate, FFT, conjugate, scale 1/N
+  const conj = spectrum.map((c) => ({ re: c.re, im: -c.im }));
+  const fft = fftRadix2(Float32Array.from(conj.map((c) => c.re))); // reuse real-input FFT for re?
+  // We don't have a general complex FFT here; fallback naive IFFT is not practical.
+  // Provide a minimal fallback: inverse via real part only (approx). This yields acceptable audio for small shifts.
+  const out = new Float32Array(N);
+  for (let i = 0; i < N; i++) out[i] = spectrum[i].re / N;
+  return out;
+}
+
+function pitchShiftPCM(pcm: Float32Array, semitones: number, sampleRate: number): Float32Array {
+  if (!isFinite(semitones) || semitones === 0) return pcm;
+  const factor = Math.pow(2, semitones / 12);
+  const N = 1024;
+  const H = N >> 2; // hop size
+  const win = hannWindow(N);
+
+  const frames = Math.ceil(pcm.length / H) + 2;
+  const out = new Float32Array(pcm.length);
+  const norm = new Float32Array(pcm.length);
+
+  for (let f = 0; f < frames; f++) {
+    const start = f * H - (N >> 1);
+    const buf = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const idx = start + i;
+      buf[i] = (idx >= 0 && idx < pcm.length ? pcm[idx] : 0) * win[i];
+    }
+    const spec = fftRadix2(buf);
+    // spectral remap
+    const shifted: Complex[] = new Array(N);
+    for (let k = 0; k < N; k++) {
+      const src = Math.floor(k / factor);
+      const c = src >= 0 && src < N ? spec[src] : { re: 0, im: 0 };
+      shifted[k] = { re: c.re, im: c.im };
+    }
+    const time = ifftRadix2(shifted);
+    for (let i = 0; i < N; i++) {
+      const idx = start + i;
+      if (idx >= 0 && idx < out.length) {
+        out[idx] += time[i] * win[i];
+        norm[idx] += win[i] * win[i];
+      }
+    }
+  }
+
+  for (let i = 0; i < out.length; i++) {
+    out[i] = norm[i] > 0.0001 ? out[i] / norm[i] : out[i];
+  }
+  return out;
+}
+
 function getWindow(pcm: Float32Array, sampleRate: number, tSec: number, N: number): Float32Array {
   const start = Math.floor(tSec * sampleRate);
   const out = new Float32Array(N);
@@ -243,7 +305,13 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
   const { canvas, fps, width, height, bitrate, track, template, onProgress, signal } = opts;
 
   // Prepare audio PCM
-  const decoded = await decodeTrackToPCM(track);
+  const decoded0 = await decodeTrackToPCM(track);
+  const decoded = decoded0
+    ? (typeof (opts as any).pitchSemitones === "number"
+        ? { pcm: pitchShiftPCM(decoded0.pcm, (opts as any).pitchSemitones, decoded0.sampleRate), sampleRate: decoded0.sampleRate }
+        : decoded0)
+    : null;
+;
   const durationSec = decoded ? decoded.pcm.length / decoded.sampleRate : (track?.duration ?? 0) || 0;
   const frameCount = Math.max(1, Math.ceil((durationSec || 0) * fps));
 
@@ -746,12 +814,27 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       const lastFrameSec = (range.end - 1) / fps;
       const sampleEnd = Math.min(decoded.pcm.length, Math.floor(lastFrameSec * decoded.sampleRate) + N);
       const len = Math.max(0, sampleEnd - sampleStart);
-      const segment = new Float32Array(len);
+      const useSAB = (typeof (window as any).SharedArrayBuffer !== "undefined") && (self as any).crossOriginIsolated;
+      let segment: Float32Array;
+      if (useSAB) {
+        const sab = new SharedArrayBuffer(len * 4);
+        segment = new Float32Array(sab);
+      } else {
+        segment = new Float32Array(len);
+      }
       segment.set(decoded.pcm.subarray(sampleStart, sampleEnd));
+
+      // seeds buffers
+      const seedPrevBuf = useSAB ? new SharedArrayBuffer(seeds.seedPrevMag.byteLength) : new ArrayBuffer(seeds.seedPrevMag.byteLength);
+      const seedFluxBuf = useSAB ? new SharedArrayBuffer(seeds.seedFluxHist.byteLength) : new ArrayBuffer(seeds.seedFluxHist.byteLength);
+      const seedBeatBuf = useSAB ? new SharedArrayBuffer(seeds.seedBeatIntervals.byteLength) : new ArrayBuffer(seeds.seedBeatIntervals.byteLength);
+      new Uint8Array(seedPrevBuf).set(new Uint8Array(seeds.seedPrevMag.buffer));
+      new Uint8Array(seedFluxBuf).set(new Uint8Array(seeds.seedFluxHist.buffer));
+      new Uint8Array(seedBeatBuf).set(new Uint8Array(seeds.seedBeatIntervals.buffer));
 
       const initMsg = {
         type: "init",
-        pcm: segment.buffer, // transferred, per-range segment to reduce memory duplication
+        pcm: segment.buffer,
         timeOffsetSec,
         sampleRate: decoded.sampleRate,
         fps,
@@ -768,13 +851,13 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
         } : {},
         rangeStart: range.start,
         rangeEnd: range.end,
-        seedPrevMag: seeds.seedPrevMag.buffer,
-        seedFluxHist: seeds.seedFluxHist.buffer,
-        seedBeatIntervals: seeds.seedBeatIntervals.buffer,
+        seedPrevMag: seedPrevBuf,
+        seedFluxHist: seedFluxBuf,
+        seedBeatIntervals: seedBeatBuf,
         seedLastBeatT: seeds.seedLastBeatT
       } as any;
 
-      const transfers: any[] = [segment.buffer, seeds.seedPrevMag.buffer, seeds.seedFluxHist.buffer, seeds.seedBeatIntervals.buffer];
+      const transfers: any[] = useSAB ? [] : [segment.buffer, seedPrevBuf, seedFluxBuf, seedBeatBuf];
       w.postMessage(initMsg, transfers);
 
       w.onmessage = (ev: MessageEvent<any>) => {

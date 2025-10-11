@@ -174,15 +174,29 @@ const TemplateEditor: React.FC = () => {
         </div>
       )}
 
-      <div className="mb-3">
-        <div className="text-xs text-gray-300 mb-1">Background image URL</div>
-        <input
-          type="text"
-          placeholder="https://example.com/image.jpg"
-          value={template.backgroundImageUrl ?? ""}
-          onChange={(e) => set({ backgroundImageUrl: e.target.value || null })}
-          className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm"
-        />
+      <div className="mb-3 grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-xs text-gray-300 mb-1">Renderer</div>
+          <select
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm w-full"
+            value={template.renderer ?? "canvas2d"}
+            onChange={(e) => set({ renderer: e.target.value })}
+            title="Rendering engine"
+          >
+            <option value="canvas2d">Canvas 2D</option>
+            <option value="webgl">WebGL</option>
+          </select>
+        </div>
+        <div>
+          <div className="text-xs text-gray-300 mb-1">Background image URL</div>
+          <input
+            type="text"
+            placeholder="https://example.com/image.jpg"
+            value={template.backgroundImageUrl ?? ""}
+            onChange={(e) => set({ backgroundImageUrl: e.target.value || null })}
+            className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm"
+          />
+        </div>
       </div>
 
       <div className="mb-3">

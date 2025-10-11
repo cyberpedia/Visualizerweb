@@ -202,6 +202,7 @@ const Exporter: React.FC = () => {
             track: currentTrack,
             template,
             outputType: exportSettings.outputType,
+            pitchSemitones: exportSettings.pitchSemitones,
             onProgress: (p, phase) => setOfflineProgress({ p, phase }),
             signal: abortCtrlRef.current.signal,
             encode: {
@@ -611,6 +612,19 @@ const Exporter: React.FC = () => {
             className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-24"
             title="Parallel workers (1-4)"
           />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-300">Pitch</span>
+            <input
+              type="range"
+              min={-12}
+              max={12}
+              step={1}
+              value={exportSettings.pitchSemitones ?? 0}
+              onChange={(e) => setExportSettings({ pitchSemitones: Number(e.target.value) })}
+              className="accent-brand-500"
+              title="Pitch shift in semitones (offline export only)"
+            />
+          </div>
           <button
             className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
             onClick={() => setShowExpert((v) => !v)}
