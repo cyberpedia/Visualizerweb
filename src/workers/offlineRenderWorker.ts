@@ -14,12 +14,14 @@ type InitMsg = {
   width: number;
   height: number;
   template: TemplateConfig;
-  track: { title: string; artist: string };
+  track: { title: string; artist: string; artSrc?: string };
   assets: {
     bg?: ArrayBuffer;
     art?: ArrayBuffer;
     layers?: { id: string; bytes: ArrayBuffer }[];
   };
+  rangeStart?: number;
+  rangeEnd?: number;
 };
 type AbortMsg = { type: "abort" };
 
@@ -129,6 +131,17 @@ function getWindow(pcm: Float32Array, sampleRate: number, tSec: number, N: numbe
 }
 
 // ---- Worker-side overlays and layers using ImageBitmap ----
+
+async function fetchBitmapFromURL(url?: string | null): Promise<ImageBitmap | null> {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await createImageBitmap(blob);
+  } catch {
+    return null;
+  }
+}
 
 function drawWorkerOverlays(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -382,6 +395,25 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
     }
   }
 
+  // Fallback: fetch images directly in worker if bytes not provided
+  if (!bgBitmap && template.backgroundImageUrl) {
+    bgBitmap = await fetchBitmapFromURL(template.backgroundImageUrl);
+  }
+  if (!artBitmap && template.showAlbumArt && (data as InitMsg).track.artSrc) {
+    artBitmap = await fetchBitmapFromURL((data as InitMsg).track.artSrc);
+  }
+  if (layerBitmaps.size === 0 && (template.layers?.length ?? 0) > 0) {
+    for (const l of (template.layers ?? [])) {
+      // @ts-ignore
+      if (l.type === "image" && l.src && !layerBitmaps.has(l.id)) {
+        const bmp = await fetchBitmapFromURL(l.src);
+        if (bmp) {
+          layerBitmaps.set(l.id, bmp);
+        }
+      }
+    }
+  }
+
   // Beat detection state
   const prevMag = new Float32Array(windowSize >> 1);
   const fluxHist: number[] = [];
@@ -389,7 +421,10 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
   let lastBeatT = 0;
   let pulse = 0;
 
-  for (let i = 0; i < frameCount; i++) {
+  const rangeStart = (data as InitMsg).rangeStart ?? 0;
+  const rangeEnd = (data as InitMsg).rangeEnd ?? frameCount;
+
+  for (let i = rangeStart; i < rangeEnd; i++) {
     if (aborted) break;
     const tSec = i / fps;
 

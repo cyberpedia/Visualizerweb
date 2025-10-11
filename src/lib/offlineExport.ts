@@ -18,6 +18,14 @@ export type OfflineExportOptions = {
   template: TemplateConfig;
   onProgress?: (p: number, phase: "capture" | "encode") => void;
   signal?: AbortSignal;
+  encode?: {
+    crf?: number;
+    preset?: "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium" | "slow";
+    audioBitrateKbps?: number;
+    pixelFormat?: "yuv420p" | "yuv444p";
+    videoCodec?: "libx264";
+  };
+  parallelWorkers?: number;
 };
 
 // ---------- Audio decoding ----------
@@ -286,50 +294,71 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       if (onProgress) onProgress(i / frameCount, "capture");
     }
   } else {
-    // Initialize worker and stream frames
-    const initMsg = {
-      type: "init",
-      pcm: decoded.pcm.buffer,
-      sampleRate: decoded.sampleRate,
-      fps,
-      frameCount,
-      windowSize: N,
-      width,
-      height,
-      template,
-      track: { title: track?.name ?? "", artist: track?.artist ?? "" },
-      assets: {
-        bg: bgBytes ? bgBytes.buffer : undefined,
-        art: artBytes ? artBytes.buffer : undefined,
-        layers: layerBytes.length ? layerBytes : undefined
-      }
-    } as any;
+    // Parallelize rendering across multiple workers in frame ranges
+    const totalFrames = frameCount;
+    const maxWorkers = Math.max(1, Math.min(4, (opts.parallelWorkers ?? 2)));
+    const hardware = (navigator as any).hardwareConcurrency || 2;
+    const concurrency = Math.max(1, Math.min(maxWorkers, Math.floor(hardware / 2) || 1));
 
-    worker!.postMessage(initMsg, [
-      decoded.pcm.buffer,
-      ...(bgBytes ? [bgBytes.buffer] : []),
-      ...(artBytes ? [artBytes.buffer] : []),
-      ...layerBytes.map((l) => l.bytes)
-    ]);
+    const ranges: Array<{ start: number; end: number }> = [];
+    const base = Math.floor(totalFrames / concurrency);
+    let cursor = 0;
+    for (let w = 0; w < concurrency; w++) {
+      const start = cursor;
+      const len = w === concurrency - 1 ? (totalFrames - cursor) : base;
+      const end = start + Math.max(0, len);
+      ranges.push({ start, end });
+      cursor = end;
+    }
 
-    await new Promise<void>((resolve, reject) => {
-      worker!.onmessage = (ev: MessageEvent<any>) => {
+    let framesCaptured = 0;
+
+    const spawn = (range: { start: number; end: number }) => new Promise<void>((resolve, reject) => {
+      const w = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
+      const initMsg = {
+        type: "init",
+        pcm: decoded.pcm.buffer, // copied (not transferred) to avoid detaching for other workers
+        sampleRate: decoded.sampleRate,
+        fps,
+        frameCount: totalFrames,
+        windowSize: N,
+        width,
+        height,
+        template,
+        track: { title: track?.name ?? "", artist: track?.artist ?? "", artSrc: track?.artUrl || undefined },
+        assets: {
+          bg: bgBytes ? bgBytes.buffer : undefined,
+          art: artBytes ? artBytes.buffer : undefined,
+          layers: layerBytes.length ? layerBytes : undefined
+        },
+        rangeStart: range.start,
+        rangeEnd: range.end
+      } as any;
+
+      w.postMessage(initMsg); // no transfer list to avoid detaching buffers
+
+      w.onmessage = (ev: MessageEvent<any>) => {
         const msg = ev.data;
         if (msg.type === "frameBytes") {
           if (aborted) { reject(new Error("aborted")); return; }
           const name = `frame_${String(msg.index + 1).padStart(5, "0")}.png`;
           ffmpeg.FS("writeFile", name, new Uint8Array(msg.bytes));
-          if (onProgress) onProgress(msg.index / frameCount, "capture");
+          framesCaptured++;
+          if (onProgress) onProgress(framesCaptured / totalFrames, "capture");
         } else if (msg.type === "done") {
           resolve();
         }
       };
-      worker!.onerror = (err) => {
-        reject(err instanceof Error ? err : new Error("worker error"));
-      };
+      w.onerror = (err) => reject(err instanceof Error ? err : new Error("worker error"));
     });
 
-    try { worker!.terminate(); } catch {}
+    // parallelWorkers taken from opts; no runtime store access
+
+    try {
+      await Promise.all(ranges.map(spawn));
+    } catch (e) {
+      if ((e as any)?.message !== "aborted") throw e;
+    }
   }
 
   // Write audio if available
@@ -349,15 +378,24 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     args.push("-i", audio.name);
   }
 
-  args.push(
-    "-c:v", "libx264",
-    "-pix_fmt", "yuv420p",
-    "-preset", "veryfast",
-    "-b:v", String(bitrate || 4_000_000),
-  );
+  const videoCodec = opts.encode?.videoCodec ?? "libx264";
+  const pixFmt = opts.encode?.pixelFormat ?? "yuv420p";
+  const preset = opts.encode?.preset ?? "veryfast";
+
+  args.push("-c:v", videoCodec);
+  args.push("-pix_fmt", pixFmt);
+  args.push("-preset", preset);
+
+  if (typeof opts.encode?.crf === "number") {
+    args.push("-crf", String(opts.encode!.crf));
+  } else {
+    args.push("-b:v", String(bitrate || 4_000_000));
+  }
 
   if (audio) {
     args.push("-c:a", "aac");
+    const abps = String(((opts.encode?.audioBitrateKbps ?? 192) * 1000) | 0);
+    args.push("-b:a", abps);
     args.push("-shortest");
   }
 

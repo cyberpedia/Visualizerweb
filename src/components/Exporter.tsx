@@ -46,7 +46,15 @@ const Exporter: React.FC = () => {
             track: currentTrack,
             template,
             onProgress: (p, phase) => setOfflineProgress({ p, phase }),
-            signal: abortCtrlRef.current.signal
+            signal: abortCtrlRef.current.signal,
+            encode: {
+              crf: exportSettings.crf,
+              preset: exportSettings.preset,
+              audioBitrateKbps: exportSettings.audioBitrateKbps,
+              pixelFormat: exportSettings.pixelFormat,
+              videoCodec: "libx264"
+            },
+            parallelWorkers: exportSettings.parallelWorkers ?? 2
           });
 
           const url = URL.createObjectURL(blob);
@@ -209,6 +217,55 @@ const Exporter: React.FC = () => {
         className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-28"
         title="Bits per second"
       />
+
+      {exportSettings.engine === "offline" && (
+        <>
+          <select
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+            value={exportSettings.preset ?? "veryfast"}
+            onChange={(e) => setExportSettings({ preset: e.target.value as any })}
+            title="x264 preset"
+          >
+            <option value="ultrafast">ultrafast</option>
+            <option value="superfast">superfast</option>
+            <option value="veryfast">veryfast</option>
+            <option value="faster">faster</option>
+            <option value="fast">fast</option>
+            <option value="medium">medium</option>
+            <option value="slow">slow</option>
+          </select>
+          <input
+            type="number"
+            value={exportSettings.crf ?? 23}
+            onChange={(e) => setExportSettings({ crf: Number(e.target.value) })}
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-20"
+            title="CRF (quality, lower is higher quality)"
+          />
+          <input
+            type="number"
+            value={exportSettings.audioBitrateKbps ?? 192}
+            onChange={(e) => setExportSettings({ audioBitrateKbps: Number(e.target.value) })}
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-24"
+            title="Audio kbps"
+          />
+          <select
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+            value={exportSettings.pixelFormat ?? "yuv420p"}
+            onChange={(e) => setExportSettings({ pixelFormat: e.target.value as any })}
+            title="Pixel format"
+          >
+            <option value="yuv420p">yuv420p</option>
+            <option value="yuv444p">yuv444p</option>
+          </select>
+          <input
+            type="number"
+            value={exportSettings.parallelWorkers ?? 2}
+            onChange={(e) => setExportSettings({ parallelWorkers: Math.max(1, Math.min(4, Number(e.target.value))) })}
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-24"
+            title="Parallel workers (1-4)"
+          />
+        </>
+      )}
 
       {exportActive && exportSettings.engine === "offline" && (
         <div className="text-xs text-gray-300 ml-2">
