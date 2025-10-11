@@ -68,8 +68,10 @@ Persistence and PWA
 ## Known limitations
 
 - Realtime export is WebM only and best-supported in Chrome/Edge; Safari/iOS should use Offline export (MP4/M4A).
-- yuv444p and high444p profile have limited hardware decoder support on many devices.
-- Advanced DSP (BPM stabilization, phase‑vocoder quality pitch/time) can be improved further.
+- Pixel format yuv444p with profile high444p has limited hardware decoder support on many devices; prefer yuv420p for broad compatibility.
+- WebGL blend modes support additive (“lighter”); multiply/screen are limited and implemented via shader passes only in some paths.
+- Streaming URL metadata/art can be blocked by CORS depending on the source.
+- Offline export with ffmpeg.wasm is CPU-intensive; using fewer parallel workers improves memory usage on low-end devices.
 
 ## Roadmap
 

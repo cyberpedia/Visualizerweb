@@ -209,6 +209,8 @@ type PlayerState = {
   setPan: (p: number) => void;
   setCompressorOn: (on: boolean) => void;
   setLimiterOn: (on: boolean) => void;
+  setReverbOn: (on: boolean) => void;
+  setReverbWet: (wet: number) => void;
   setEqGain: (band: number, db: number) => void;
   setAnalyzer: (an: AnalyserNode | null) => void;
   setTemplate: (t: Partial<TemplateConfig>) => void;
@@ -292,9 +294,10 @@ export const usePlayerStore = create<PlayerState>()(
       playbackRate: 1,
       pan: 0,
       compressorOn: false,
+      limiterOn: false,
       reverbOn: false,
       reverbWet: 0.25,
-      eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0
+      eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       visualizerTemplate: DEFAULT_TEMPLATE,
       analyzer: null,
       shuffle: false,
@@ -363,6 +366,9 @@ export const usePlayerStore = create<PlayerState>()(
       setPlaybackRate: (r) => set(() => ({ playbackRate: Math.min(2, Math.max(0.5, r)) })),
       setPan: (p) => set(() => ({ pan: Math.min(1, Math.max(-1, p)) })),
       setCompressorOn: (on) => set(() => ({ compressorOn: !!on })),
+      setLimiterOn: (on) => set(() => ({ limiterOn: !!on })),
+      setReverbOn: (on) => set(() => ({ reverbOn: !!on })),
+      setReverbWet: (wet) => set(() => ({ reverbWet: Math.min(1, Math.max(0, wet)) })),
       setEqGain: (band, db) =>
         set((s) => {
           const next = s.eqGains.slice();
@@ -483,8 +489,7 @@ export const usePlayerStore = create<PlayerState>()(
         limiterOn: s.limiterOn,
         reverbOn: s.reverbOn,
         reverbWet: s.reverbWet,
-        eqGains: s.eqGa_codeinnews</,
-
+        eqGains: s.eqGains,
         visualizerTemplate: s.visualizerTemplate,
         exportSettings: s.exportSettings,
         exportPresets: s.exportPresets,

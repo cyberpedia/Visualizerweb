@@ -96,6 +96,43 @@ void main() {
 }
 `;
 
+// Textured quad with circle mask (pixel-space using gl_FragCoord)
+const FS_TEX_MASK = `
+precision mediump float;
+varying vec2 vTex;
+uniform sampler2D uTex;
+uniform float uAlpha;
+uniform vec2 uCenter; // pixels (framebuffer space)
+uniform float uRadius; // pixels
+void main() {
+  vec4 c = texture2D(uTex, vTex);
+  // gl_FragCoord origin is bottom-left
+  vec2 frag = vec2(gl_FragCoord.x, gl_FragCoord.y);
+  float d = distance(frag, uCenter);
+  float m = smoothstep(uRadius + 1.5, uRadius - 1.5, d);
+  gl_FragColor = vec4(c.rgb, c.a * uAlpha * m);
+}
+`;
+
+// SDF text with circle mask
+const FS_SDF_MASK = `
+precision mediump float;
+varying vec2 vTex;
+uniform sampler2D uTex;
+uniform vec3 uTextColor;
+uniform float uAlpha;
+uniform vec2 uCenter; // pixels
+uniform float uRadius; // pixels
+void main(){
+  float dSdf = texture2D(uTex, vTex).a;
+  float a = smoothstep(0.5 - 0.12, 0.5 + 0.12, dSdf);
+  vec2 frag = vec2(gl_FragCoord.x, gl_FragCoord.y);
+  float d = distance(frag, uCenter);
+  float m = smoothstep(uRadius + 1.5, uRadius - 1.5, d);
+  gl_FragColor = vec4(uTextColor, a * uAlpha * m);
+}
+`;
+
 const VisualizerGLCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const analyzer = usePlayerStore((s) => s.analyzer);
@@ -226,6 +263,8 @@ void main(){
 }
 `;
     const progSDF = createProgram(gl, VS_TEX, FS_SDF);
+    const progTexMask = createProgram(gl, VS_TEX, FS_TEX_MASK);
+    const progSDFMask = createProgram(gl, VS_TEX, FS_SDF_MASK);
 
     // Fullscreen quad + postprocessing (blur + composite bloom)
     const VS_QUAD = `
@@ -295,12 +334,29 @@ void main(){
     const uAlphaTexLoc = gl.getUniformLocation(progTex, "uAlpha");
     const uSamplerLoc = gl.getUniformLocation(progTex, "uTex");
 
+    // Masked texture uniforms
+    const aPosTexMaskLoc = gl.getAttribLocation(progTexMask, "aPos");
+    const aTexMaskLoc = gl.getAttribLocation(progTexMask, "aTex");
+    const uAlphaTexMaskLoc = gl.getUniformLocation(progTexMask, "uAlpha");
+    const uSamplerTexMaskLoc = gl.getUniformLocation(progTexMask, "uTex");
+    const uCenterTexLoc = gl.getUniformLocation(progTexMask, "uCenter");
+    const uRadiusTexLoc = gl.getUniformLocation(progTexMask, "uRadius");
+
     // SDF text locations
     const aPosSDFLoc = gl.getAttribLocation(progSDF, "aPos");
     const aTexSDFLoc = gl.getAttribLocation(progSDF, "aTex");
     const uSamplerSDFLoc = gl.getUniformLocation(progSDF, "uTex");
     const uTextColorLoc = gl.getUniformLocation(progSDF, "uTextColor");
     const uAlphaSDFLoc = gl.getUniformLocation(progSDF, "uAlpha");
+
+    // Masked SDF uniforms
+    const aPosSDFMaskLoc = gl.getAttribLocation(progSDFMask, "aPos");
+    const aTexSDFMaskLoc = gl.getAttribLocation(progSDFMask, "aTex");
+    const uSamplerSDFMaskLoc = gl.getUniformLocation(progSDFMask, "uTex");
+    const uTextColorMaskLoc = gl.getUniformLocation(progSDFMask, "uTextColor");
+    const uAlphaSDFMaskLoc = gl.getUniformLocation(progSDFMask, "uAlpha");
+    const uCenterSDFLoc = gl.getUniformLocation(progSDFMask, "uCenter");
+    const uRadiusSDFLoc = gl.getUniformLocation(progSDFMask, "uRadius");
 
     // Blur/composite locations
     const aPosQuadLoc = gl.getAttribLocation(progBlur, "aPos");
@@ -499,6 +555,22 @@ void main(){
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    // Helper: apply rect mask via scissor in framebuffer pixel space
+    const applyRectMask = (mask: any | undefined, dpr: number) => {
+      if (!mask || mask.type !== "rect") return false;
+      const x = Math.floor(mask.x * dpr);
+      const y = Math.floor(mask.y * dpr);
+      const w = Math.floor(mask.width * dpr);
+      const h = Math.floor(mask.height * dpr);
+      gl.enable(gl.SCISSOR_TEST);
+      // gl_FragCoord/scissor origin bottom-left: convert from top-left UI coords
+      gl.scissor(x, canvas.height - (y + h), w, h);
+      return true;
+    };
+    const endMask = () => {
+      gl.disable(gl.SCISSOR_TEST);
+    };
 
     const draw = () => {
       analyzer.getByteFrequencyData(freqArr);
@@ -837,19 +909,45 @@ void main(){
             (x / width) * 2 - 1, ((y + tex.h) / height) * -2 + 1, 0, 1
           ]);
           const col = hexToRGB(layer.color || "#ffffff");
-          gl.useProgram(progSDF);
-          gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
-          gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
-          gl.enableVertexAttribArray(aPosSDFLoc);
-          gl.vertexAttribPointer(aPosSDFLoc, 2, gl.FLOAT, false, 16, 0);
-          gl.enableVertexAttribArray(aTexSDFLoc);
-          gl.vertexAttribPointer(aTexSDFLoc, 2, gl.FLOAT, false, 16, 8);
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, tex.tex);
-          gl.uniform1i(uSamplerSDFLoc, 0);
-          gl.uniform3f(uTextColorLoc, col[0], col[1], col[2]);
-          gl.uniform1f(uAlphaSDFLoc, opacity);
-          gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          const isCircleMask = layer.mask && layer.mask.type === "circle";
+          const appliedRect = applyRectMask(layer.mask, dpr);
+
+          if (isCircleMask) {
+            const cx = Math.floor(layer.mask.x * dpr);
+            const cy = Math.floor((height - layer.mask.y) * dpr); // convert top-left to bottom-left origin
+            const rad = Math.max(1, Math.floor(layer.mask.radius * dpr));
+
+            gl.useProgram(progSDFMask);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+            gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(aPosSDFMaskLoc);
+            gl.vertexAttribPointer(aPosSDFMaskLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTexSDFMaskLoc);
+            gl.vertexAttribPointer(aTexSDFMaskLoc, 2, gl.FLOAT, false, 16, 8);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+            gl.uniform1i(uSamplerSDFMaskLoc, 0);
+            gl.uniform3f(uTextColorMaskLoc, col[0], col[1], col[2]);
+            gl.uniform1f(uAlphaSDFMaskLoc, opacity);
+            gl.uniform2f(uCenterSDFLoc, cx, cy);
+            gl.uniform1f(uRadiusSDFLoc, rad);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          } else {
+            gl.useProgram(progSDF);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+            gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(aPosSDFLoc);
+            gl.vertexAttribPointer(aPosSDFLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTexSDFLoc);
+            gl.vertexAttribPointer(aTexSDFLoc, 2, gl.FLOAT, false, 16, 8);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+            gl.uniform1i(uSamplerSDFLoc, 0);
+            gl.uniform3f(uTextColorLoc, col[0], col[1], col[2]);
+            gl.uniform1f(uAlphaSDFLoc, opacity);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          }
+          if (appliedRect) endMask();
         } else if (layer.type === "image") {
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);
@@ -868,18 +966,43 @@ void main(){
             ((x + w) / width) * 2 - 1, ((y + h) / height) * -2 + 1, 1, 1,
             (x / width) * 2 - 1, ((y + h) / height) * -2 + 1, 0, 1
           ]);
-          gl.useProgram(progTex);
-          gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
-          gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
-          gl.enableVertexAttribArray(aPosTexLoc);
-          gl.vertexAttribPointer(aPosTexLoc, 2, gl.FLOAT, false, 16, 0);
-          gl.enableVertexAttribArray(aTexLoc);
-          gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 16, 8);
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, texInfo.tex);
-          gl.uniform1i(uSamplerLoc, 0);
-          gl.uniform1f(uAlphaTexLoc, opacity);
-          gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          const isCircleMask = layer.mask && layer.mask.type === "circle";
+          const appliedRect = applyRectMask(layer.mask, dpr);
+
+          if (isCircleMask) {
+            const cx = Math.floor(layer.mask.x * dpr);
+            const cy = Math.floor((height - layer.mask.y) * dpr);
+            const rad = Math.max(1, Math.floor(layer.mask.radius * dpr));
+
+            gl.useProgram(progTexMask);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+            gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(aPosTexMaskLoc);
+            gl.vertexAttribPointer(aPosTexMaskLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTexMaskLoc);
+            gl.vertexAttribPointer(aTexMaskLoc, 2, gl.FLOAT, false, 16, 8);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texInfo.tex);
+            gl.uniform1i(uSamplerTexMaskLoc, 0);
+            gl.uniform1f(uAlphaTexMaskLoc, opacity);
+            gl.uniform2f(uCenterTexLoc, cx, cy);
+            gl.uniform1f(uRadiusTexLoc, rad);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          } else {
+            gl.useProgram(progTex);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+            gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(aPosTexLoc);
+            gl.vertexAttribPointer(aPosTexLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTexLoc);
+            gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 16, 8);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texInfo.tex);
+            gl.uniform1i(uSamplerLoc, 0);
+            gl.uniform1f(uAlphaTexLoc, opacity);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          }
+          if (appliedRect) endMask();
         } else if (layer.type === "shape") {
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);
