@@ -171,57 +171,108 @@ function hannWindow(N: number): Float32Array {
   return w;
 }
 
-function ifftRadix2(spectrum: Complex[]): Float32Array {
-  const N = spectrum.length;
-  // conjugate, FFT, conjugate, scale 1/N
-  const conj = spectrum.map((c) => ({ re: c.re, im: -c.im }));
-  const fft = fftRadix2(Float32Array.from(conj.map((c) => c.re))); // reuse real-input FFT for re?
-  // We don't have a general complex FFT here; fallback naive IFFT is not practical.
-  // Provide a minimal fallback: inverse via real part only (approx). This yields acceptable audio for small shifts.
-  const out = new Float32Array(N);
-  for (let i = 0; i < N; i++) out[i] = spectrum[i].re / N;
+// Linear resampling (speed change)
+function resampleLinear(pcm: Float32Array, speed: number): Float32Array {
+  if (!isFinite(speed) || speed <= 0) return pcm;
+  const outLen = Math.max(1, Math.floor(pcm.length / speed));
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const src = i * speed;
+    const j0 = Math.floor(src);
+    const j1 = Math.min(pcm.length - 1, j0 + 1);
+    const t = src - j0;
+    out[i] = (1 - t) * pcm[j0] + t * pcm[j1];
+  }
   return out;
 }
 
-function pitchShiftPCM(pcm: Float32Array, semitones: number, sampleRate: number): Float32Array {
-  if (!isFinite(semitones) || semitones === 0) return pcm;
-  const factor = Math.pow(2, semitones / 12);
-  const N = 1024;
-  const H = N >> 2; // hop size
+// WSOLA time-stretch (preserve pitch)
+function wsolaStretch(input: Float32Array, stretch: number): Float32Array {
+  if (!isFinite(stretch) || stretch <= 0) return input;
+  if (Math.abs(stretch - 1) < 1e-3) return input;
+
+  const N = 1024; // window size
+  const Ha = 256; // analysis hop
+  const Hs = Math.max(1, Math.round(Ha * stretch)); // synthesis hop
   const win = hannWindow(N);
 
-  const frames = Math.ceil(pcm.length / H) + 2;
-  const out = new Float32Array(pcm.length);
-  const norm = new Float32Array(pcm.length);
+  const outLen = Math.max(N + Hs * Math.floor((input.length - N) / Ha), N);
+  const out = new Float32Array(outLen);
+  const norm = new Float32Array(outLen);
 
-  for (let f = 0; f < frames; f++) {
-    const start = f * H - (N >> 1);
-    const buf = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      const idx = start + i;
-      buf[i] = (idx >= 0 && idx < pcm.length ? pcm[idx] : 0) * win[i];
+  let aPos = 0; // analysis position
+  let sPos = 0; // synthesis position
+
+  // First frame
+  for (let i = 0; i < N; i++) {
+    const idx = aPos + i;
+    const v = idx >= 0 && idx < input.length ? input[idx] : 0;
+    out[sPos + i] += v * win[i];
+    norm[sPos + i] += win[i] * win[i];
+  }
+  aPos += Ha;
+  sPos += Hs;
+
+  const searchRadius = 64;
+  const overlap = Ha;
+
+  while (sPos + N < outLen && aPos + N < input.length) {
+    // Reference segment: last overlap in output
+    const refStart = sPos - overlap;
+    const ref = new Float32Array(overlap);
+    for (let i = 0; i < overlap; i++) {
+      const idx = refStart + i;
+      ref[i] = idx >= 0 && idx < outLen ? out[idx] : 0;
     }
-    const spec = fftRadix2(buf);
-    // spectral remap
-    const shifted: Complex[] = new Array(N);
-    for (let k = 0; k < N; k++) {
-      const src = Math.floor(k / factor);
-      const c = src >= 0 && src < N ? spec[src] : { re: 0, im: 0 };
-      shifted[k] = { re: c.re, im: c.im };
-    }
-    const time = ifftRadix2(shifted);
-    for (let i = 0; i < N; i++) {
-      const idx = start + i;
-      if (idx >= 0 && idx < out.length) {
-        out[idx] += time[i] * win[i];
-        norm[idx] += win[i] * win[i];
+
+    // Search best match around aPos in input
+    let bestOffset = 0;
+    let bestScore = -Infinity;
+    for (let off = -searchRadius; off <= searchRadius; off++) {
+      let score = 0;
+      for (let i = 0; i < overlap; i++) {
+        const inIdx = aPos + off + i;
+        const v = inIdx >= 0 && inIdx < input.length ? input[inIdx] : 0;
+        score += ref[i] * v;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestOffset = off;
       }
     }
+
+    const start = aPos + bestOffset;
+    for (let i = 0; i < N; i++) {
+      const idx = start + i;
+      const v = idx >= 0 && idx < input.length ? input[idx] : 0;
+      out[sPos + i] += v * win[i];
+      norm[sPos + i] += win[i] * win[i];
+    }
+
+    aPos += Ha;
+    sPos += Hs;
   }
 
   for (let i = 0; i < out.length; i++) {
-    out[i] = norm[i] > 0.0001 ? out[i] / norm[i] : out[i];
+    out[i] = norm[i] > 1e-6 ? out[i] / norm[i] : out[i];
   }
+  return out;
+}
+
+// High-quality pitch shift using resample + WSOLA
+function pitchShiftPCM(pcm: Float32Array, semitones: number, sampleRate: number): Float32Array {
+  if (!isFinite(semitones) || semitones === 0) return pcm;
+  const factor = Math.pow(2, semitones / 12); // pitch up/down factor
+  // Step 1: speed change to alter pitch
+  const sped = resampleLinear(pcm, 1 / factor); // speed up when factor>1
+  // Step 2: time-stretch to original duration
+  const stretch = factor; // restore length
+  const stretched = wsolaStretch(sped, stretch);
+  // Ensure output length matches input length
+  if (stretched.length === pcm.length) return stretched;
+  if (stretched.length > pcm.length) return stretched.subarray(0, pcm.length);
+  const out = new Float32Array(pcm.length);
+  out.set(stretched);
   return out;
 }
 
@@ -403,327 +454,195 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       if (onProgress) onProgress(i / frameCount, "capture");
     }
   } else if (template.backgroundVideoUrl) {
-    // Main-thread deterministic rendering with background video frames
-    const video = document.createElement("video");
-    video.src = template.backgroundVideoUrl!;
-    video.muted = true;
-    (video as any).playsInline = true;
+    // Decode background video frames in a worker (ffmpeg.wasm), then render in parallel workers
+    const totalFrames = frameCount;
+    const maxWorkers = Math.max(1, Math.min(4, (opts.parallelWorkers ?? 2)));
+    const hardware = (navigator as any).hardwareConcurrency || 2;
+    const concurrency = Math.max(1, Math.min(maxWorkers, Math.floor(hardware / 2) || 1));
+
+    const ranges: Array<{ start: number; end: number }> = [];
+    const base = Math.floor(totalFrames / concurrency);
+    let cursor = 0;
+    for (let w = 0; w < concurrency; w++) {
+      const start = cursor;
+      const len = w === concurrency - 1 ? (totalFrames - cursor) : base;
+      const end = start + Math.max(0, len);
+      ranges.push({ start, end });
+      cursor = end;
+    }
+
+    let framesCaptured = 0;
+
+    const computeSeedsForRange = (startFrame: number) => {
+      const SEED_HISTORY = 60;
+      const half = N >> 1;
+      const prevMag = new Float32Array(half);
+      const fluxHist: number[] = [];
+      const beatIntervals: number[] = [];
+      let lastBeatT = 0;
+
+      const startIdx = Math.max(0, startFrame - (SEED_HISTORY + 1));
+      let prev: Uint8Array | null = null;
+      for (let fIdx = startIdx; fIdx < startFrame; fIdx++) {
+        const tSec = fIdx / fps;
+        const win = getWindow(decoded.pcm, decoded.sampleRate, tSec, N);
+        const cur = computeSpectrumUint8(win);
+        if (fIdx === startFrame - 1) {
+          for (let i = 0; i < half; i++) prevMag[i] = cur[i];
+        }
+        if (prev) {
+          let flux = 0;
+          for (let i = 0; i < cur.length; i++) {
+            const diff = cur[i] - prev[i];
+            if (diff > 0) flux += diff;
+          }
+          fluxHist.push(flux);
+        }
+        prev = cur;
+      }
+
+      if (fluxHist.length) {
+        const mean = fluxHist.reduce((a, b) => a + b, 0) / fluxHist.length;
+        const variance = fluxHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / fluxHist.length;
+        const std = Math.sqrt(variance);
+        const threshold = mean + 1.8 * std;
+        const minInterval = 0.25;
+        let lastT = (startIdx + 1) / fps;
+        for (let i = 0; i < fluxHist.length; i++) {
+          const t = (startIdx + 1 + i) / fps;
+          const flux = fluxHist[i];
+          if (flux > threshold && t - lastBeatT > minInterval) {
+            if (lastBeatT > 0) {
+              beatIntervals.push(t - lastBeatT);
+              if (beatIntervals.length > 12) beatIntervals.shift();
+            }
+            lastBeatT = t;
+          }
+          lastT = t;
+        }
+      }
+
+      return {
+        seedPrevMag: prevMag,
+        seedFluxHist: new Float32Array(fluxHist),
+        seedBeatIntervals: new Float32Array(beatIntervals),
+        seedLastBeatT: lastBeatT
+      };
+    };
+
+    // Decode background frames using worker
+    const decodeWorker = new Worker(new URL("../workers/videoDecodeWorker.ts", import.meta.url), { type: "module" });
+    workers.push(decodeWorker);
+
+    const bgFramesAll: { index: number; bytes: ArrayBuffer }[] = [];
+    let decodeDone = false;
+
+    const bgFetch = async (): Promise<ArrayBuffer> => {
+      const res = await fetch(template.backgroundVideoUrl!);
+      const buf = await res.arrayBuffer();
+      return buf;
+    };
+    const bgBytesBuf = await bgFetch();
+
+    decodeWorker.postMessage({ type: "decode", bytes: bgBytesBuf, fps, width, height }, [bgBytesBuf]);
+
+    decodeWorker.onmessage = (ev: MessageEvent<any>) => {
+      const msg = ev.data;
+      if (msg.type === "frame") {
+        bgFramesAll.push({ index: msg.index, bytes: msg.bytes as ArrayBuffer });
+      } else if (msg.type === "done") {
+        decodeDone = true;
+      }
+    };
+
     await new Promise<void>((resolve) => {
-      video.onloadeddata = () => resolve();
-      video.onerror = () => resolve();
+      const check = () => {
+        if (aborted) resolve();
+        if (decodeDone) resolve();
+        else setTimeout(check, 50);
+      };
+      check();
     });
 
-    // Prepare synchronous overlay assets
-    let artImg: HTMLImageElement | null = null;
-    if (artBytes) {
-      try {
-        const blob = new Blob([artBytes], { type: "image/png" });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.src = url;
-        await new Promise<void>((r) => {
-          if (img.complete) return r();
-          img.onload = () => r();
-          img.onerror = () => r();
-        });
-        artImg = img;
-      } catch {}
-    }
-    const layerImgs = new Map<string, HTMLImageElement>();
-    for (const it of layerBytes) {
-      try {
-        const blob = new Blob([it.bytes], { type: "image/png" });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.src = url;
-        await new Promise<void>((r) => {
-          if (img.complete) return r();
-          img.onload = () => r();
-          img.onerror = () => r();
-        });
-        layerImgs.set(it.id, img);
-      } catch {}
-    }
+    const spawn = (range: { start: number; end: number }, includeAssets: boolean) => new Promise<void>((resolve, reject) => {
+      const w = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
+      workers.push(w);
 
-    const N = 1024;
-    const half = N >> 1;
-    const prevMag = new Float32Array(half);
-    const fluxHist: number[] = [];
-    const beatIntervals: number[] = [];
-    let lastBeatT = 0;
-    let pulse = 0;
+      const seeds = computeSeedsForRange(range.start);
 
-    const drawOverlaysSync = (ctx: CanvasRenderingContext2D) => {
-      // album art
-      if (template.showAlbumArt && artImg) {
-        const size = template.albumArtSize ?? 96;
-        const pad = 16;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(pad + size / 2, pad + size / 2, size / 2, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.clip();
-        ctx.drawImage(artImg, pad, pad, size, size);
-        ctx.restore();
-      }
-      if (template.titleOverlay?.show && track?.name) {
-        ctx.save();
-        ctx.fillStyle = template.titleOverlay.color;
-        ctx.font = `${template.titleOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
-        ctx.textAlign = template.titleOverlay.align as any;
-        const x = template.titleOverlay.x;
-        const y = template.titleOverlay.y;
-        ctx.fillText(track?.name, x, y);
-        ctx.restore();
-      }
-      if (template.artistOverlay?.show && track?.artist) {
-        ctx.save();
-        ctx.fillStyle = template.artistOverlay.color;
-        ctx.font = `${template.artistOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
-        ctx.textAlign = template.artistOverlay.align as any;
-        const x = template.artistOverlay.x;
-        const y = template.artistOverlay.y;
-        ctx.fillText(track?.artist, x, y);
-        ctx.restore();
-      }
-    };
-
-    const drawLayersSync = (ctx: CanvasRenderingContext2D, tSec: number, duration: number) => {
-      const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
-      for (const layer of layers as any[]) {
-        if (!layer.visible) continue;
-        switch (layer.type) {
-          case "text": {
-            const l: any = layer;
-            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
-            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
-            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
-            const size = l.kf?.size ? interpKF(l.kf.size, tSec, l.size) : l.size;
-            ctx.save();
-            ctx.globalAlpha = opacity;
-            ctx.fillStyle = l.color;
-            ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
-            ctx.textAlign = l.align as any;
-            if (l.strokeColor && l.strokeWidth) {
-              ctx.lineWidth = l.strokeWidth;
-              ctx.strokeStyle = l.strokeColor;
-              ctx.strokeText(l.text, x, y);
-            }
-            ctx.fillText(l.text, x, y);
-            ctx.restore();
-            break;
-          }
-          case "image": {
-            const l: any = layer;
-            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
-            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
-            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
-            const size = l.kf?.size ? interpKF(l.kf.size, tSec, Math.max(l.width, l.height)) : Math.max(l.width, l.height);
-            const img = layerImgs.get(l.id) || null;
-            if (!img) break;
-            const w = l.width ?? size;
-            const h = l.height ?? size;
-            ctx.save();
-            ctx.globalAlpha = opacity;
-            if (l.clipCircle) {
-              ctx.beginPath();
-              ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
-              ctx.closePath();
-              ctx.clip();
-            }
-            ctx.drawImage(img, x, y, w, h);
-            ctx.restore();
-            break;
-          }
-          case "shape": {
-            const l: any = layer;
-            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
-            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
-            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
-            ctx.save();
-            ctx.globalAlpha = opacity;
-            if (l.shape === "rect") {
-              const w = l.width ?? 100;
-              const h = l.height ?? 50;
-              if (l.fillGradient && (l.fillGradient.from && l.fillGradient.to)) {
-                const grad = l.fillGradient.horizontal
-                  ? ctx.createLinearGradient(x, y, x + w, y)
-                  : ctx.createLinearGradient(x, y, x, y + h);
-                grad.addColorStop(0, l.fillGradient.from);
-                grad.addColorStop(1, l.fillGradient.to);
-                ctx.fillStyle = grad;
-                ctx.fillRect(x, y, w, h);
-              } else if (l.fillColor) {
-                ctx.fillStyle = l.fillColor;
-                ctx.fillRect(x, y, w, h);
-              }
-              if (l.strokeColor && l.strokeWidth) {
-                ctx.strokeStyle = l.strokeColor;
-                ctx.lineWidth = l.strokeWidth;
-                ctx.strokeRect(x, y, w, h);
-              }
-            } else if (l.shape === "circle") {
-              const r = l.radius ?? 40;
-              ctx.beginPath();
-              ctx.arc(x, y, r, 0, Math.PI * 2);
-              ctx.closePath();
-              if (l.fillColor) {
-                ctx.fillStyle = l.fillColor;
-                ctx.fill();
-              }
-              if (l.strokeColor && l.strokeWidth) {
-                ctx.strokeStyle = l.strokeColor;
-                ctx.lineWidth = l.strokeWidth;
-                ctx.stroke();
-              }
-            }
-            ctx.restore();
-            break;
-          }
-          case "progressRing": {
-            const l: any = layer;
-            const x = l.kf?.x ? interpKF(l.kf.x, tSec, l.x) : l.x;
-            const y = l.kf?.y ? interpKF(l.kf.y, tSec, l.y) : l.y;
-            const opacity = l.kf?.opacity ? interpKF(l.kf.opacity, tSec, l.opacity) : l.opacity;
-            const radius = l.kf?.size ? interpKF(l.kf.size, tSec, l.radius) : l.radius;
-            const thick = l.thickness ?? 8;
-            const t = duration > 0 ? Math.min(1, Math.max(0, tSec / duration)) : 0;
-            const endAngle = -Math.PI / 2 + t * Math.PI * 2;
-            ctx.save();
-            ctx.globalAlpha = opacity;
-            ctx.lineWidth = thick;
-            ctx.strokeStyle = lerpColor(l.color1, l.color2, t);
-            ctx.beginPath();
-            ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
-            ctx.stroke();
-            ctx.restore();
-            break;
-          }
-          case "particles": {
-            const l: any = layer;
-            ctx.save();
-            ctx.globalAlpha = l.opacity;
-            ctx.fillStyle = l.color;
-            const count = l.count;
-            const speed = l.speed * (1 + 0.5 * (beatPulse || 0));
-            for (let i = 0; i < count; i++) {
-              const px = Math.random() * width;
-              const py = Math.random() * height;
-              const s = l.size * (1 + 0.3 * (beatPulse || 0));
-              ctx.beginPath();
-              ctx.arc(px, py - speed, s, 0, Math.PI * 2);
-              ctx.fill();
-            }
-            ctx.restore();
-            break;
-          }
-        }
-      }
-    };
-
-    for (let i = 0; i < frameCount; i++) {
-      if (aborted) throw new Error("aborted");
-      const tSec = i / fps;
-
-      // seek video and draw frame
-      await new Promise<void>((resolve) => {
-        const onSeeked = () => {
-          video.removeEventListener("seeked", onSeeked);
-          resolve();
-        };
-        video.addEventListener("seeked", onSeeked);
-        try {
-          video.currentTime = Math.min(video.duration || tSec, tSec);
-        } catch {
-          resolve();
-        }
-      });
-      ctx.clearRect(0, 0, width, height);
-      try {
-        ctx.drawImage(video, 0, 0, width, height);
-      } catch {
-        // fallback fill
-        const bg = template.background ?? "#0b1020";
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, width, height);
-      }
-
-      // analysis
-      const win = getWindow(decoded.pcm, decoded.sampleRate, tSec, N);
-      const time = computeTimeDomainUint8(win);
-      const cur = computeSpectrumUint8(win);
-
-      // smoothing similar to live analyzer
-      for (let k = 0; k < cur.length; k++) {
-        const smoothed = Math.round(prevMag[k] * 0.7 + cur[k] * 0.3);
-        cur[k] = smoothed;
-      }
-
-      // spectral flux beat detection
-      let flux = 0;
-      for (let k = 0; k < cur.length; k++) {
-        const diff = cur[k] - prevMag[k];
-        if (diff > 0) flux += diff;
-        prevMag[k] = cur[k];
-      }
-      fluxHist.push(flux);
-      if (fluxHist.length > 120) fluxHist.shift();
-      const mean = fluxHist.reduce((a, b) => a + b, 0) / fluxHist.length;
-      const variance = fluxHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / fluxHist.length;
-      const std = Math.sqrt(variance);
-      const threshold = mean + 1.8 * std;
-
-      const minInterval = 0.25;
-      if (flux > threshold && tSec - lastBeatT > minInterval) {
-        if (lastBeatT > 0) {
-          beatIntervals.push(tSec - lastBeatT);
-          if (beatIntervals.length > 12) beatIntervals.shift();
-        }
-        lastBeatT = tSec;
-        pulse = 1;
+      const timeOffsetSec = range.start / fps;
+      const sampleStart = Math.max(0, Math.floor(timeOffsetSec * decoded.sampleRate));
+      const lastFrameSec = (range.end - 1) / fps;
+      const sampleEnd = Math.min(decoded.pcm.length, Math.floor(lastFrameSec * decoded.sampleRate) + N);
+      const len = Math.max(0, sampleEnd - sampleStart);
+      const useSAB = (typeof (window as any).SharedArrayBuffer !== "undefined") && (self as any).crossOriginIsolated;
+      let segment: Float32Array;
+      if (useSAB) {
+        const sab = new SharedArrayBuffer(len * 4);
+        segment = new Float32Array(sab);
       } else {
-        pulse *= 0.92;
+        segment = new Float32Array(len);
       }
+      segment.set(decoded.pcm.subarray(sampleStart, sampleEnd));
 
-      const bpm =
-        beatIntervals.length >= 4
-          ? 60 / (beatIntervals.reduce((a, b) => a + b, 0) / beatIntervals.length)
-          : undefined;
+      // seeds buffers
+      const seedPrevBuf = useSAB ? new SharedArrayBuffer(seeds.seedPrevMag.byteLength) : new ArrayBuffer(seeds.seedPrevMag.byteLength);
+      const seedFluxBuf = useSAB ? new SharedArrayBuffer(seeds.seedFluxHist.byteLength) : new ArrayBuffer(seeds.seedFluxHist.byteLength);
+      const seedBeatBuf = useSAB ? new SharedArrayBuffer(seeds.seedBeatIntervals.byteLength) : new ArrayBuffer(seeds.seedBeatIntervals.byteLength);
+      new Uint8Array(seedPrevBuf).set(new Uint8Array(seeds.seedPrevMag.buffer));
+      new Uint8Array(seedFluxBuf).set(new Uint8Array(seeds.seedFluxHist.buffer));
+      new Uint8Array(seedBeatBuf).set(new Uint8Array(seeds.seedBeatIntervals.buffer));
 
-      // draw visualizer
-      const vis =
-        template.type === "bars" ? BarSpectrum :
-        template.type === "circle" ? CircleSpectrum :
-        Waveform;
-      vis.draw({
-        ctx: ctx as unknown as CanvasRenderingContext2D,
+      // select bg frames for this range
+      const bgFramesRange = bgFramesAll.filter((f) => f.index >= range.start && f.index < range.end);
+
+      const initMsg = {
+        type: "init",
+        pcm: segment.buffer,
+        timeOffsetSec,
+        sampleRate: decoded.sampleRate,
+        fps,
+        frameCount: totalFrames,
+        windowSize: N,
         width,
         height,
-        time: tSec,
-        freq: cur,
-        timeDomain: time,
         template,
-        beatPulse: pulse,
-        bpm,
-        trackInfo: {
-          title: track?.name ?? "",
-          artist: track?.artist ?? ""
+        track: { title: track?.name ?? "", artist: track?.artist ?? "", artSrc: track?.artUrl || undefined },
+        assets: includeAssets ? {
+          bgFrames: bgFramesRange,
+          art: artBytes ? artBytes.buffer : undefined,
+          layers: layerBytes.length ? layerBytes : undefined
+        } : { bgFrames: bgFramesRange },
+        rangeStart: range.start,
+        rangeEnd: range.end,
+        seedPrevMag: seedPrevBuf,
+        seedFluxHist: seedFluxBuf,
+        seedBeatIntervals: seedBeatBuf,
+        seedLastBeatT: seeds.seedLastBeatT
+      } as any;
+
+      const transfers: any[] = useSAB ? [] : [segment.buffer, seedPrevBuf, seedFluxBuf, seedBeatBuf, ...bgFramesRange.map((f) => f.bytes)];
+      w.postMessage(initMsg, transfers);
+
+      w.onmessage = (ev: MessageEvent<any>) => {
+        const msg = ev.data;
+        if (msg.type === "frameBytes") {
+          if (aborted) { reject(new Error("aborted")); return; }
+          const name = `frame_${String(msg.index + 1).padStart(5, "0")}.png`;
+          ffmpeg.FS("writeFile", name, new Uint8Array(msg.bytes));
+          framesCaptured++;
+          if (onProgress) onProgress(framesCaptured / totalFrames, "capture");
+        } else if (msg.type === "done") {
+          resolve();
         }
-      });
+      };
+      w.onerror = (err) => reject(err instanceof Error ? err : new Error("worker error"));
+    });
 
-      // overlays
-      drawOverlaysSync(ctx as any);
-
-      // layers
-      const duration = (frameCount / fps);
-      drawLayersSync(ctx as any, tSec, duration);
-
-      // write frame
-      const name = `frame_${String(i + 1).padStart(5, "0")}.png`;
-      const blob: Blob = await new Promise((resolve) => (canvas as HTMLCanvasElement).toBlob((b) => resolve(b!), "image/png"));
-      const ab = await blob.arrayBuffer();
-      ffmpeg.FS("writeFile", name, new Uint8Array(ab));
-      if (onProgress) onProgress(i / frameCount, "capture");
+    try {
+      await Promise.all(ranges.map((r, idx) => spawn(r, idx === 0)));
+    } catch (e) {
+      if ((e as any)?.message !== "aborted") throw e;
     }
   } else {
     // Parallelize rendering across multiple workers in frame ranges

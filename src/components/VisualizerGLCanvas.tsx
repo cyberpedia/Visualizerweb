@@ -25,7 +25,8 @@ function createProgram(gl: WebGLRenderingContext, vsSrc: string, fsSrc: string) 
   return prog;
 }
 
-const VS = `
+// Bars program (points)
+const VS_POINTS = `
 attribute float aIndex;
 uniform float uCount;
 uniform float uWidth;
@@ -50,16 +51,24 @@ void main() {
 }
 `;
 
-const FS = `
+const FS_POINTS = `
 precision mediump float;
 uniform vec3 uColor1;
 uniform vec3 uColor2;
 uniform float uHeight;
-uniform float uScale;
 void main() {
   float t = gl_FragCoord.y / uHeight;
   vec3 c = mix(uColor1, uColor2, t);
   gl_FragColor = vec4(c, 1.0);
+}
+`;
+
+// Simple color fragment shader (for lines)
+const FS_COLOR = `
+precision mediump float;
+uniform vec3 uColor;
+void main() {
+  gl_FragColor = vec4(uColor, 1.0);
 }
 `;
 
@@ -111,33 +120,40 @@ const VisualizerGLCanvas: React.FC = () => {
     const onResize = () => resize();
     window.addEventListener("resize", onResize);
 
-    const prog = createProgram(gl, VS, FS);
-    gl.useProgram(prog);
+    // Programs
+    const progPoints = createProgram(gl, VS_POINTS, FS_POINTS);
+    const progLines = createProgram(gl, `
+attribute vec2 aPos;
+void main() {
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`, FS_COLOR);
 
-    const aIndexLoc = gl.getAttribLocation(prog, "aIndex");
-    const uCountLoc = gl.getUniformLocation(prog, "uCount");
-    const uWidthLoc = gl.getUniformLocation(prog, "uWidth");
-    const uHeightLoc = gl.getUniformLocation(prog, "uHeight");
-    const uBarWidthLoc = gl.getUniformLocation(prog, "uBarWidth");
-    const uScaleLoc = gl.getUniformLocation(prog, "uScale");
-    const uGapLoc = gl.getUniformLocation(prog, "uGap");
-    const uAmplitudeLoc = gl.getUniformLocation(prog, "uAmplitude[0]");
-    const uColor1Loc = gl.getUniformLocation(prog, "uColor1");
-    const uColor2Loc = gl.getUniformLocation(prog, "uColor2");
-    const uDprLoc = gl.getUniformLocation(prog, "uDpr");
+    const aIndexLoc = gl.getAttribLocation(progPoints, "aIndex");
+    const uCountLoc = gl.getUniformLocation(progPoints, "uCount");
+    const uWidthLoc = gl.getUniformLocation(progPoints, "uWidth");
+    const uHeightLoc = gl.getUniformLocation(progPoints, "uHeight");
+    const uBarWidthLoc = gl.getUniformLocation(progPoints, "uBarWidth");
+    const uAmplitudeLoc = gl.getUniformLocation(progPoints, "uAmplitude[0]");
+    const uColor1Loc = gl.getUniformLocation(progPoints, "uColor1");
+    const uColor2Loc = gl.getUniformLocation(progPoints, "uColor2");
+    const uDprLoc = gl.getUniformLocation(progPoints, "uDpr");
+
+    const uColorLoc = gl.getUniformLocation(progLines, "uColor");
 
     const count = Math.min(template.barCount ?? 64, 256);
     const indices = new Float32Array(count);
     for (let i = 0; i < count; i++) indices[i] = i;
 
-    const buf = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    const bufPoints = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufPoints);
     gl.bufferData(gl.ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
-    gl.enableVertexAttribArray(aIndexLoc);
-    gl.vertexAttribPointer(aIndexLoc, 1, gl.FLOAT, false, 0, 0);
+    const bufLines = gl.createBuffer()!;
+    const bufWave = gl.createBuffer()!;
 
     const freqArr = new Uint8Array(analyzer.frequencyBinCount);
+    const timeArr = new Uint8Array(analyzer.fftSize);
     const prevArr = new Uint8Array(analyzer.frequencyBinCount);
     let pulse = 0;
 
@@ -155,6 +171,7 @@ const VisualizerGLCanvas: React.FC = () => {
 
     const draw = () => {
       analyzer.getByteFrequencyData(freqArr);
+      analyzer.getByteTimeDomainData(timeArr);
 
       // spectral flux
       let flux = 0;
@@ -186,33 +203,89 @@ const VisualizerGLCanvas: React.FC = () => {
       const dpr = Math.max(1, window.devicePixelRatio || 1);
       const width = canvas.width / dpr;
       const height = canvas.height / dpr;
-      const barWidth = Math.max(2, Math.floor(width / (count * 1.5)));
-      const gap = Math.max(1, barWidth * 0.25);
-
-      const amp = new Float32Array(256);
-      for (let i = 0; i < count; i++) {
-        const bin = Math.floor(i / count * freqArr.length);
-        amp[i] = Math.max(1, (freqArr[bin] / 255) * (height * 0.6) * (1 + 0.2 * pulse));
-      }
 
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
 
-      gl.useProgram(prog);
-      gl.uniform1f(uCountLoc, count);
-      gl.uniform1f(uWidthLoc, width);
-      gl.uniform1f(uHeightLoc, height);
-      gl.uniform1f(uBarWidthLoc, barWidth);
-      gl.uniform1f(uScaleLoc, 1.0);
-      gl.uniform1f(uGapLoc, gap);
-      gl.uniform1fv(uAmplitudeLoc, amp);
       const c1 = hexToRGB(template.color1 || "#6366f1");
       const c2 = hexToRGB(template.color2 || "#22d3ee");
-      gl.uniform3f(uColor1Loc, c1[0], c1[1], c1[2]);
-      gl.uniform3f(uColor2Loc, c2[0], c2[1], c2[2]);
-      gl.uniform1f(uDprLoc, dpr);
 
-      gl.drawArrays(gl.POINTS, 0, count);
+      if (template.type === "bars") {
+        const barWidth = Math.max(2, Math.floor(width / (count * 1.5)));
+        const gap = Math.max(1, barWidth * 0.25);
+
+        const amp = new Float32Array(256);
+        for (let i = 0; i < count; i++) {
+          const bin = Math.floor(i / count * freqArr.length);
+          amp[i] = Math.max(1, (freqArr[bin] / 255) * (height * 0.6) * (1 + 0.2 * pulse));
+        }
+
+        gl.useProgram(progPoints);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufPoints);
+        gl.enableVertexAttribArray(aIndexLoc);
+        gl.vertexAttribPointer(aIndexLoc, 1, gl.FLOAT, false, 0, 0);
+        gl.uniform1f(uCountLoc, count);
+        gl.uniform1f(uWidthLoc, width);
+        gl.uniform1f(uHeightLoc, height);
+        gl.uniform1f(uBarWidthLoc, barWidth);
+        gl.uniform1fv(uAmplitudeLoc, amp);
+        gl.uniform3f(uColor1Loc, c1[0], c1[1], c1[2]);
+        gl.uniform3f(uColor2Loc, c2[0], c2[1], c2[2]);
+        gl.uniform1f(uDprLoc, dpr);
+        gl.drawArrays(gl.POINTS, 0, count);
+      } else if (template.type === "circle") {
+        const radius = template.circle?.radius ?? 160;
+        const thick = template.circle?.thickness ?? 8;
+        const gap = template.circle?.gap ?? 2;
+        const cx = width / 2;
+        const cy = height / 2;
+        const verts = new Float32Array(count * 4); // x,y for inner and outer per bar
+        for (let i = 0; i < count; i++) {
+          const angle = (i / count) * Math.PI * 2;
+          const bin = Math.floor(i / count * freqArr.length);
+          const amp = (freqArr[bin] / 255) * (radius * 0.5) * (1 + 0.2 * pulse);
+          const x0 = (cx + Math.cos(angle) * (radius));
+          const y0 = (cy + Math.sin(angle) * (radius));
+          const x1 = (cx + Math.cos(angle) * (radius + amp));
+          const y1 = (cy + Math.sin(angle) * (radius + amp));
+          const idx = i * 4;
+          // convert to clip space [-1,1]
+          verts[idx + 0] = (x0 / width) * 2 - 1;
+          verts[idx + 1] = (y0 / height) * -2 + 1;
+          verts[idx + 2] = (x1 / width) * 2 - 1;
+          verts[idx + 3] = (y1 / height) * -2 + 1;
+        }
+        gl.useProgram(progLines);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufLines);
+        gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        const aPosLoc = gl.getAttribLocation(progLines, "aPos");
+        gl.enableVertexAttribArray(aPosLoc);
+        gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform3f(uColorLoc, c1[0], c1[1], c1[2]);
+        gl.lineWidth(Math.max(1, thick));
+        gl.drawArrays(gl.LINES, 0, count * 2);
+      } else {
+        // waveform
+        const samples = Math.min(timeArr.length, Math.floor(width));
+        const verts = new Float32Array(samples * 2);
+        for (let i = 0; i < samples; i++) {
+          const t = i / samples;
+          const x = t * width;
+          const v = Math.max(0, Math.min(255, timeArr[Math.floor(t * timeArr.length)]));
+          const y = (v / 255) * height;
+          verts[i * 2 + 0] = (x / width) * 2 - 1;
+          verts[i * 2 + 1] = (y / height) * -2 + 1;
+        }
+        gl.useProgram(progLines);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufWave);
+        gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        const aPosLoc = gl.getAttribLocation(progLines, "aPos");
+        gl.enableVertexAttribArray(aPosLoc);
+        gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform3f(uColorLoc, c2[0], c2[1], c2[2]);
+        gl.lineWidth(2);
+        gl.drawArrays(gl.LINE_STRIP, 0, samples);
+      }
 
       raf = requestAnimationFrame(draw);
     };
@@ -222,7 +295,7 @@ const VisualizerGLCanvas: React.FC = () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
     };
-  }, [analyzer, template.renderer, template.color1, template.color2, exportActive, exportSettings.mode, exportSettings.width, exportSettings.height]);
+  }, [analyzer, template.renderer, template.type, template.color1, template.color2, exportActive, exportSettings.mode, exportSettings.width, exportSettings.height]);
 
   return (
     <div className="canvas-container h-[55vh] md:h-[60vh] lg:h-[65vh] xl:h-[70vh]">

@@ -18,6 +18,7 @@ type InitMsg = {
   track: { title: string; artist: string; artSrc?: string };
   assets: {
     bg?: ArrayBuffer;
+    bgFrames?: { index: number; bytes: ArrayBuffer }[];
     art?: ArrayBuffer;
     layers?: { id: string; bytes: ArrayBuffer }[];
   };
@@ -412,10 +413,20 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
   let bgBitmap: ImageBitmap | null = null;
   let artBitmap: ImageBitmap | null = null;
   const layerBitmaps = new Map<string, ImageBitmap>();
+  const bgFrameBytes = new Map<number, ArrayBuffer>();
+  const bgFrameBitmaps = new Map<number, ImageBitmap>();
 
   try {
     if (assets.bg) {
       bgBitmap = await createImageBitmap(new Blob([assets.bg]));
+    }
+  } catch {}
+
+  try {
+    if (assets.bgFrames && assets.bgFrames.length) {
+      for (const f of assets.bgFrames) {
+        bgFrameBytes.set(f.index, f.bytes);
+      }
     }
   } catch {}
 
@@ -496,7 +507,21 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
 
     // clear / background
     ctx.clearRect(0, 0, width, height);
-    if (bgBitmap) {
+    if (bgFrameBytes.size > 0) {
+      const bytes = bgFrameBytes.get(i);
+      if (bytes) {
+        let bmp = bgFrameBitmaps.get(i) || null;
+        if (!bmp) {
+          try {
+            bmp = await createImageBitmap(new Blob([bytes]));
+            bgFrameBitmaps.set(i, bmp!);
+          } catch {}
+        }
+        if (bmp) {
+          ctx.drawImage(bmp, 0, 0, width, height);
+        }
+      }
+    } else if (bgBitmap) {
       ctx.drawImage(bgBitmap, 0, 0, width, height);
     } else {
       const bg = template.background ?? "#0b1020";
