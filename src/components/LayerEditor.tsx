@@ -1,0 +1,426 @@
+import React from "react";
+import { usePlayerStore, Layer } from "../state/store";
+import { audioEngine } from "../lib/audio";
+
+function newTextLayer(): Layer {
+  return {
+    id: crypto.randomUUID(),
+    type: "text",
+    visible: true,
+    zIndex: 100,
+    x: 200,
+    y: 200,
+    opacity: 1,
+    text: "Sample Text",
+    color: "#ffffff",
+    size: 20,
+    align: "left",
+    kf: {}
+  } as any;
+}
+
+function newImageLayer(): Layer {
+  return {
+    id: crypto.randomUUID(),
+    type: "image",
+    visible: true,
+    zIndex: 100,
+    x: 100,
+    y: 100,
+    opacity: 1,
+    src: "",
+    width: 128,
+    height: 128,
+    clipCircle: false,
+    kf: {}
+  } as any;
+}
+
+function newProgressRingLayer(): Layer {
+  return {
+    id: crypto.randomUUID(),
+    type: "progressRing",
+    visible: true,
+    zIndex: 100,
+    x: 80,
+    y: 80,
+    opacity: 1,
+    radius: 60,
+    thickness: 8,
+    color1: "#22d3ee",
+    color2: "#ec4899",
+    kf: {}
+  } as any;
+}
+
+function newParticlesLayer(): Layer {
+  return {
+    id: crypto.randomUUID(),
+    type: "particles",
+    visible: true,
+    zIndex: 10,
+    x: 0,
+    y: 0,
+    opacity: 0.6,
+    count: 80,
+    size: 2,
+    speed: 1.2,
+    color: "#22d3ee",
+    kf: {}
+  } as any;
+}
+
+const LayerEditor: React.FC = () => {
+  const template = usePlayerStore((s) => s.visualizerTemplate);
+  const addLayer = usePlayerStore((s) => s.addLayer);
+  const updateLayer = usePlayerStore((s) => s.updateLayer);
+  const removeLayer = usePlayerStore((s) => s.removeLayer);
+
+  const addKF = (id: string, prop: "x" | "y" | "opacity" | "size") => {
+    const time = audioEngine.getCurrentTime();
+    const layer = (template.layers ?? []).find((l) => l.id === id);
+    if (!layer) return;
+    const base =
+      prop === "x" ? layer.x :
+      prop === "y" ? layer.y :
+      prop === "opacity" ? layer.opacity :
+      (layer as any).size ?? 0;
+
+    const nextKF = [...(layer.kf?.[prop] ?? []), { time, value: base, easing: "linear" }];
+    updateLayer(id, { kf: { ...layer.kf, [prop]: nextKF } } as any);
+  };
+
+  return (
+    <div className="p-3 border-t border-gray-800">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold">Layer Editor</h2>
+        <div className="flex items-center gap-2">
+          <button
+            className="text-xs px-2 py-1 rounded bg-brand-600 hover:bg-brand-500"
+            onClick={() => addLayer(newTextLayer())}
+          >
+            + Text
+          </button>
+          <button
+            className="text-xs px-2 py-1 rounded bg-brand-600 hover:bg-brand-500"
+            onClick={() => addLayer(newImageLayer())}
+          >
+            + Image
+          </button>
+          <button
+            className="text-xs px-2 py-1 rounded bg-brand-600 hover:bg-brand-500"
+            onClick={() => addLayer(newProgressRingLayer())}
+          >
+            + Progress Ring
+          </button>
+          <button
+            className="text-xs px-2 py-1 rounded bg-brand-600 hover:bg-brand-500"
+            onClick={() => addLayer(newParticlesLayer())}
+          >
+            + Particles
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2">
+        {(template.layers ?? []).map((layer) => (
+          <div key={layer.id} className="p-2 rounded bg-gray-900 border border-gray-800">
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wide text-gray-400">{layer.type}</div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={layer.visible}
+                    onChange={(e) => updateLayer(layer.id, { visible: e.target.checked })}
+                  />
+                  visible
+                </label>
+                <button
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={() => removeLayer(layer.id)}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="text-xs">
+                X
+                <input
+                  type="number"
+                  value={layer.x}
+                  onChange={(e) => updateLayer(layer.id, { x: Number(e.target.value) })}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+                <button
+                  className="mt-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={() => addKF(layer.id, "x")}
+                >
+                  + keyframe
+                </button>
+              </label>
+              <label className="text-xs">
+                Y
+                <input
+                  type="number"
+                  value={layer.y}
+                  onChange={(e) => updateLayer(layer.id, { y: Number(e.target.value) })}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+                <button
+                  className="mt-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={() => addKF(layer.id, "y")}
+                >
+                  + keyframe
+                </button>
+              </label>
+              <label className="text-xs">
+                Opacity
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={layer.opacity}
+                  onChange={(e) => updateLayer(layer.id, { opacity: Number(e.target.value) })}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+                <button
+                  className="mt-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={() => addKF(layer.id, "opacity")}
+                >
+                  + keyframe
+                </button>
+              </label>
+            </div>
+
+            {layer.type === "text" && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <label className="text-xs col-span-2">
+                  Text
+                  <input
+                    type="text"
+                    value={(layer as any).text}
+                    onChange={(e) => updateLayer(layer.id, { text: e.target.value } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Size
+                  <input
+                    type="number"
+                    value={(layer as any).size}
+                    onChange={(e) => updateLayer(layer.id, { size: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                  <button
+                    className="mt-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                    onClick={() => addKF(layer.id, "size")}
+                  >
+                    + keyframe
+                  </button>
+                </label>
+                <label className="text-xs">
+                  Color
+                  <input
+                    type="color"
+                    value={(layer as any).color}
+                    onChange={(e) => updateLayer(layer.id, { color: e.target.value } as any)}
+                  />
+                </label>
+                <label className="text-xs">
+                  Align
+                  <select
+                    value={(layer as any).align}
+                    onChange={(e) => updateLayer(layer.id, { align: e.target.value } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  >
+                    <option value="left">left</option>
+                    <option value="center">center</option>
+                    <option value="right">right</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {layer.type === "image" && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <label className="text-xs col-span-2">
+                  Src
+                  <input
+                    type="text"
+                    value={(layer as any).src}
+                    onChange={(e) => updateLayer(layer.id, { src: e.target.value } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Pick file
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      const url = URL.createObjectURL(f);
+                      updateLayer(layer.id, { src: url } as any);
+                    }}
+                  />
+                </label>
+                <label className="text-xs">
+                  Width
+                  <input
+                    type="number"
+                    value={(layer as any).width}
+                    onChange={(e) => updateLayer(layer.id, { width: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Height
+                  <input
+                    type="number"
+                    value={(layer as any).height}
+                    onChange={(e) => updateLayer(layer.id, { height: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={(layer as any).clipCircle || false}
+                    onChange={(e) => updateLayer(layer.id, { clipCircle: e.target.checked } as any)}
+                  />
+                  circle mask
+                </label>
+              </div>
+            )}
+
+            {layer.type === "shape" && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <label className="text-xs">
+                  Shape
+                  <select
+                    value={(layer as any).shape}
+                    onChange={(e) => updateLayer(layer.id, { shape: e.target.value } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  >
+                    <option value="rect">rect</option>
+                    <option value="circle">circle</option>
+                  </select>
+                </label>
+                <label className="text-xs">
+                  Width
+                  <input
+                    type="number"
+                    value={(layer as any).width ?? 100}
+                    onChange={(e) => updateLayer(layer.id, { width: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Height
+                  <input
+                    type="number"
+                    value={(layer as any).height ?? 50}
+                    onChange={(e) => updateLayer(layer.id, { height: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Radius
+                  <input
+                    type="number"
+                    value={(layer as any).radius ?? 40}
+                    onChange={(e) => updateLayer(layer.id, { radius: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Fill
+                  <input
+                    type="color"
+                    value={(layer as any).fillColor}
+                    onChange={(e) => updateLayer(layer.id, { fillColor: e.target.value } as any)}
+                  />
+                </label>
+                <label className="text-xs">
+                  Stroke
+                  <input
+                    type="color"
+                    value={(layer as any).strokeColor ?? "#000000"}
+                    onChange={(e) => updateLayer(layer.id, { strokeColor: e.target.value } as any)}
+                  />
+                  <input
+                    type="number"
+                    value={(layer as any).strokeWidth ?? 0}
+                    onChange={(e) => updateLayer(layer.id, { strokeWidth: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs mt-1"
+                  />
+                </label>
+              </div>
+            )}
+
+            {layer.type === "progressRing" && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <label className="text-xs">
+                  Radius
+                  <input
+                    type="number"
+                    value={(layer as any).radius}
+                    onChange={(e) => updateLayer(layer.id, { radius: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Thickness
+                  <input
+                    type="number"
+                    value={(layer as any).thickness}
+                    onChange={(e) => updateLayer(layer.id, { thickness: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Color 1
+                  <input
+                    type="color"
+                    value={(layer as any).color1}
+                    onChange={(e) => updateLayer(layer.id, { color1: e.target.value } as any)}
+                  />
+                </label>
+                <label className="text-xs">
+                  Color 2
+                  <input
+                    type="color"
+                    value={(layer as any).color2}
+                    onChange={(e) => updateLayer(layer.id, { color2: e.target.value } as any)}
+                  />
+                </label>
+                <button
+                  className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                  onClick={() => addKF(layer.id, "size")}
+                >
+                  + radius keyframe
+                </button>
+              </div>
+            )}
+
+            {layer.kf && (
+              <div className="mt-2">
+                <div className="text-[11px] text-gray-400">Keyframes:</div>
+                <pre className="text-[10px] bg-gray-950 rounded p-2 overflow-auto max-h-32">
+                  {JSON.stringify(layer.kf, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default LayerEditor;
