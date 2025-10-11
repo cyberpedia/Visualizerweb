@@ -23,7 +23,8 @@ const FileBrowser: React.FC = () => {
         artist: meta.artist,
         album: meta.album,
         duration: meta.duration,
-        artUrl: meta.artUrl || null
+        artUrl: meta.artUrl || null,
+        file: f
       });
     }
     if (list.length) addTracks(list);

@@ -65,6 +65,18 @@ export class AudioEngine {
     this.gainNode.gain.value = Math.min(1, Math.max(0, v));
   }
 
+  fadeTo(seconds: number, target: number) {
+    const ctx = this.ensureCtx();
+    if (!this.gainNode) return;
+    const now = ctx.currentTime;
+    const clamped = Math.min(1, Math.max(0, target));
+    try {
+      this.gainNode.gain.cancelScheduledValues(now);
+      this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
+      this.gainNode.gain.linearRampToValueAtTime(clamped, now + Math.max(0.01, seconds));
+    } catch {}
+  }
+
   setEqGain(bandIndex: number, db: number) {
     const node = this.eqNodes[bandIndex];
     if (!node) return;

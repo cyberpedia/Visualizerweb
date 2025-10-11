@@ -8,6 +8,7 @@ import TemplateGallery from "./components/TemplateGallery";
 import LayerEditor from "./components/LayerEditor";
 import Exporter from "./components/Exporter";
 import FileBrowser from "./components/FileBrowser";
+import PWAInstallPrompt from "./components/PWAInstallPrompt";
 
 export default function App() {
   return (
@@ -15,16 +16,17 @@ export default function App() {
       <header className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
         <h1 className="text-lg font-semibold">Avee Web Player</h1>
         <div className="flex items-center gap-3">
-          <Exporter />
-          <a
+         <<Exporter />
+         <<PWAInstallPrompt />
+         <sa
             href="https://cosine.sh"
             target="_blank"
             rel="noreferrer"
             className="text-sm text-gray-300 hover:text-white"
           >
             Built with Genie by Cosine
-          </a>
-        </div>
+        </  a>
+      </  div>
       </header>
 
       <main className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-0">

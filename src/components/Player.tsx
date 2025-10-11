@@ -26,20 +26,32 @@ const Player: React.FC = () => {
     audioEngine.setVolume(volume);
   }, []);
 
-  // Track change
+  // Track change with simple crossfade
   useEffect(() => {
     const el = audioRef.current!;
     const track = playlist[currentIndex];
     if (!el || !track) return;
 
-    el.src = track.url;
-    el.currentTime = 0;
-    el.play().then(() => {
-      setPlaying(true);
-      audioEngine.resume();
-    }).catch(() => {
-      setPlaying(false);
-    });
+    // fade out current audio quickly
+    audioEngine.fadeTo(0.25, 0);
+
+    const switchTrack = async () => {
+      el.src = track.url;
+      el.currentTime = 0;
+      try {
+        await el.play();
+        setPlaying(true);
+        audioEngine.resume();
+        // fade in to target volume
+        audioEngine.fadeTo(0.35, volume);
+      } catch {
+        setPlaying(false);
+      }
+    };
+
+    // allow fade-out before switching
+    const id = setTimeout(() => switchTrack(), 240);
+    return () => clearTimeout(id);
   }, [playlist, currentIndex]);
 
   // Playback state

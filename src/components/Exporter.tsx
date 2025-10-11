@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { audioEngine } from "../lib/audio";
 import { usePlayerStore } from "../state/store";
+import { exportOfflineMP4 } from "../lib/offlineExport";
 
 const Exporter: React.FC = () => {
   const playing = usePlayerStore((s) => s.playing);
@@ -9,14 +10,65 @@ const Exporter: React.FC = () => {
   const setExportActive = usePlayerStore((s) => s.setExportActive);
   const exportSettings = usePlayerStore((s) => s.exportSettings);
   const setExportSettings = usePlayerStore((s) => s.setExportSettings);
+  const currentTrack = usePlayerStore((s) => s.playlist[s.currentIndex] ?? null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const [offlineProgress, setOfflineProgress] = useState<{ p: number; phase: "capture" | "encode" | null }>({ p: 0, phase: null });
+  const abortCtrlRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!exportActive) return;
 
-    // wait a tick for canvas to resize based on exportSettings
+    if (exportSettings.engine === "offline") {
+      // Offline export via ffmpeg.wasm
+      const run = async () => {
+        if (!canvasEl) {
+          alert("No canvas detected.");
+          setExportActive(false);
+          return;
+        }
+        abortCtrlRef.current = new AbortController();
+
+        try {
+          const fps = exportSettings.fps || 30;
+          // wait a tick for canvas to resize based on exportSettings
+          await new Promise((r) => setTimeout(r, 50));
+
+          // start capture & encode
+          const blob = await exportOfflineMP4({
+            canvas: canvasEl,
+            fps,
+            width: canvasEl.width,
+            height: canvasEl.height,
+            bitrate: exportSettings.bitrate || 4_000_000,
+            track: currentTrack,
+            onProgress: (p, phase) => setOfflineProgress({ p, phase }),
+            signal: abortCtrlRef.current.signal
+          });
+
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `avee-export-${Date.now()}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        } catch (e) {
+          if (!(e as any)?.message?.includes("aborted")) {
+            alert("Offline export failed. Try a shorter clip or lower bitrate.");
+          }
+        } finally {
+          setExportActive(false);
+          setOfflineProgress({ p: 0, phase: null });
+          abortCtrlRef.current = null;
+        }
+      };
+      run();
+      return;
+    }
+
+    // Real-time export via MediaRecorder
     const start = async () => {
       if (!canvasEl) {
         alert("No canvas detected.");
@@ -71,12 +123,16 @@ const Exporter: React.FC = () => {
 
     const id = requestAnimationFrame(() => start());
     return () => cancelAnimationFrame(id);
-  }, [exportActive, canvasEl, exportSettings.fps, exportSettings.bitrate]);
+  }, [exportActive, canvasEl, exportSettings.fps, exportSettings.bitrate, exportSettings.engine, currentTrack?.id]);
 
   const toggleExport = () => {
     if (exportActive) {
-      const rec = recorderRef.current;
-      if (rec && rec.state !== "inactive") rec.stop();
+      if (exportSettings.engine === "offline") {
+        abortCtrlRef.current?.abort();
+      } else {
+        const rec = recorderRef.current;
+        if (rec && rec.state !== "inactive") rec.stop();
+      }
       setExportActive(false);
     } else {
       if (!playing) {
@@ -96,6 +152,17 @@ const Exporter: React.FC = () => {
       >
         {exportActive ? "Stop Export" : "Export Video"}
       </button>
+
+      <select
+        className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+        value={exportSettings.engine ?? "realtime"}
+        onChange={(e) => setExportSettings({ engine: e.target.value as any })}
+        title="Choose export engine"
+      >
+        <option value="realtime">Realtime (WebM)</option>
+        <option value="offline">Offline (MP4)</option>
+      </select>
+
       <select
         className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
         value={exportSettings.mode}
@@ -140,6 +207,13 @@ const Exporter: React.FC = () => {
         className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs w-28"
         title="Bits per second"
       />
+
+      {exportActive && exportSettings.engine === "offline" && (
+        <div className="text-xs text-gray-300 ml-2">
+          {offlineProgress.phase === "capture" && `Capturing frames: ${Math.round(offlineProgress.p * 100)}%`}
+          {offlineProgress.phase === "encode" && `Encoding...`}
+        </div>
+      )}
     </div>
   );
 };

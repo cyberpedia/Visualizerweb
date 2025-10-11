@@ -12,7 +12,9 @@
     "music-metadata-browser": "^2.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zustand": "^4.5.2"
+    "zustand": "^4.5.2",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/core": "^0.12.6"
   },
   "devDependencies": {
     "@types/react": "^18.3.4",

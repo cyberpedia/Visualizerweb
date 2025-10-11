@@ -9,6 +9,7 @@ export type Track = {
   album?: string;
   duration?: number;
   artUrl?: string | null;
+  file?: File; // original file reference for offline export
 };
 
 export type VisualizerType = "bars" | "circle" | "waveform";
@@ -127,6 +128,7 @@ export type ExportSettings = {
   height?: number;
   fps: number;
   bitrate: number; // bits per second
+  engine?: "realtime" | "offline"; // realtime MediaRecorder(WebM) or offline ffmpeg.wasm(MP4)
 };
 
 type PlayerState = {
@@ -199,7 +201,8 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
 const DEFAULT_EXPORT: ExportSettings = {
   mode: "auto",
   fps: 30,
-  bitrate: 4_000_000
+  bitrate: 4_000_000,
+  engine: "realtime"
 };
 
 export const usePlayerStore = create<PlayerState>()(
