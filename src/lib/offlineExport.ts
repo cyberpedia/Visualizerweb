@@ -373,7 +373,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       };
     };
 
-    const spawn = (range: { start: number; end: number }) => new Promise<void>((resolve, reject) => {
+    const spawn = (range: { start: number; end: number }, includeAssets: boolean) => new Promise<void>((resolve, reject) => {
       const w = new Worker(new URL("../workers/offlineRenderWorker.ts", import.meta.url), { type: "module" });
       workers.push(w);
 
@@ -399,11 +399,11 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
         height,
         template,
         track: { title: track?.name ?? "", artist: track?.artist ?? "", artSrc: track?.artUrl || undefined },
-        assets: {
+        assets: includeAssets ? {
           bg: bgBytes ? bgBytes.buffer : undefined,
           art: artBytes ? artBytes.buffer : undefined,
           layers: layerBytes.length ? layerBytes : undefined
-        },
+        } : {},
         rangeStart: range.start,
         rangeEnd: range.end,
         seedPrevMag: seeds.seedPrevMag.buffer,
@@ -433,7 +433,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     // parallelWorkers taken from opts; no runtime store access
 
     try {
-      await Promise.all(ranges.map(spawn));
+      await Promise.all(ranges.map((r, idx) => spawn(r, idx === 0)));
     } catch (e) {
       if ((e as any)?.message !== "aborted") throw e;
     }

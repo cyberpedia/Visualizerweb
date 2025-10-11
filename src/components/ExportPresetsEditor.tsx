@@ -291,6 +291,43 @@ const BUILT_IN_PRESETS: BuiltIn[] = [
     }
   },
   {
+    name: "YouTube 1440p (2560×1440, 60fps)",
+    category: "YouTube",
+    settings: {
+      mode: "custom",
+      width: 2560,
+      height: 1440,
+      fps: 60,
+      preset: "slow",
+      forceCrf: true,
+      crf: 20,
+      audioBitrateKbps: 256,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "5.0",
+      tune: "film",
+      parallelWorkers: 2
+    }
+  },
+  {
+    name: "Vertical 2K 1440×2560 (60fps)",
+    category: "TikTok",
+    settings: {
+      mode: "custom",
+      width: 1440,
+      height: 2560,
+      fps: 60,
+      preset: "medium",
+      forceCrf: true,
+      crf: 21,
+      audioBitrateKbps: 192,
+      pixelFormat: "yuv420p",
+      profile: "high",
+      level: "5.0",
+      parallelWorkers: 2
+    }
+  },
+  {
     name: "YouTube HDR-like 1080p",
     category: "YouTube",
     settings: {
@@ -555,7 +592,11 @@ const ExportPresetsEditor: React.FC = () => {
                 </button>
                 <button
                   className="px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-xs"
-                  onClick={() => removePreset(p.id)}
+                  onClick={() => {
+                    const ok = window.confirm(`Delete "${p.name}"? This cannot be undone.`);
+                    if (!ok) return;
+                    removePreset(p.id);
+                  }}
                   title="Delete preset"
                 >
                   Delete

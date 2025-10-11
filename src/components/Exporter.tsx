@@ -335,6 +335,13 @@ const Exporter: React.FC = () => {
         <option value="realtime">Realtime (WebM)</option>
         <option value="offline">Offline (MP4)</option>
       </select>
+      <button
+        className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+        onClick={() => setShowPlatformTips((v) => !v)}
+        title="Show platform-specific export tips"
+      >
+        {showPlatformTips ? "Hide Tips" : "Platform Tips"}
+      </button>
 
       {exportSettings.engine === "offline" && (
         <select
@@ -366,6 +373,34 @@ const Exporter: React.FC = () => {
             Save Preset
           </button>
           <button
+            className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs"
+            onClick={() => {
+              const name = window.prompt("Preset name", `Preset ${exportPresetsList.length + 1}`)?.trim();
+              if (!name) return;
+              const s = exportSettings;
+              addPreset(name, {
+                engine: s.engine,
+                mode: s.mode,
+                width: s.width,
+                height: s.height,
+                fps: s.fps,
+                bitrate: s.bitrate,
+                forceCrf: s.forceCrf,
+                crf: s.crf,
+                preset: s.preset,
+                audioBitrateKbps: s.audioBitrateKbps,
+                pixelFormat: s.pixelFormat,
+                parallelWorkers: s.parallelWorkers,
+                tune: s.tune,
+                profile: s.profile,
+                level: s.level
+              }, undefined, "Custom");
+            }}
+            title="Save current settings with a custom name"
+          >
+            Save As…
+          </button>
+          <button
             className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
             onClick={exportPresetsJSON}
             title="Export custom presets to JSON"
@@ -389,13 +424,6 @@ const Exporter: React.FC = () => {
             Import JSON
           </label>
           {importingJSON && <span className="text-xs text-gray-400">Importing…</span>}
-          <button
-            className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
-            onClick={() => setShowPlatformTips((v) => !v)}
-            title="Show platform-specific export tips"
-          >
-            {showPlatformTips ? "Hide Tips" : "Platform Tips"}
-          </button>
 
           {/* Custom presets quick apply/duplicate */}
           {exportPresetsList.length > 0 && (
@@ -650,14 +678,14 @@ const Exporter: React.FC = () => {
     )
     }
 
-    {showPlatformTips && exportSettings.engine === "offline" && (
+    {showPlatformTips && (
       <div className="mt-2 bg-gray-900 border border-gray-800 rounded p-3 text-xs text-gray-300">
         <div className="font-semibold mb-1">Platform export tips</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-gray-200 mb-1">YouTube</div>
             <ul className="list-disc ml-4">
-              <li>Resolution: 1080p (1920×1080) or 4K (3840×2160)</li>
+              <li>Resolution: 1080p (1920×1080), 1440p (2560×1440), or 4K (3840×2160)</li>
               <li>FPS: 30 or 60</li>
               <li>Encoding: CRF 18–22, preset medium/fast, pixelFormat yuv420p</li>
               <li>Profile/Level: high, 4.0 (1080p30) or 4.1 (1080p60)</li>
@@ -668,7 +696,7 @@ const Exporter: React.FC = () => {
           <div>
             <div className="text-gray-200 mb-1">TikTok</div>
             <ul className="list-disc ml-4">
-              <li>Resolution: 1080×1920 (vertical)</li>
+              <li>Resolution: 1080×1920 (vertical), or 1440×2560 for higher quality</li>
               <li>FPS: 30 or 60</li>
               <li>Encoding: CRF 20–24, preset fast/medium, yuv420p</li>
               <li>Profile/Level: high, 4.1 recommended</li>
@@ -679,7 +707,7 @@ const Exporter: React.FC = () => {
             <div className="text-gray-200 mb-1">Instagram</div>
             <ul className="list-disc ml-4">
               <li>Square: 1080×1080 (30/60 fps)</li>
-              <li>Reels (vertical): 720×1280 or 1080×1920</li>
+              <li>Reels (vertical): 720×1280, 1080×1920, or 1440×2560</li>
               <li>Encoding: CRF 20–24, preset fast/medium, yuv420p</li>
               <li>Profile/Level: high, 3.1 (720p) or 4.1 (1080p)</li>
               <li>Audio: 160–192 kbps AAC</li>
