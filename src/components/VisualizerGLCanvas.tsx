@@ -163,6 +163,12 @@ const VisualizerGLCanvas: React.FC = () => {
     let texPong: WebGLTexture | null = null;
     let fboPong: WebGLFramebuffer | null = null;
 
+    // Layer offscreen and scratch compositing
+    let texLayer: WebGLTexture | null = null;
+    let fboLayer: WebGLFramebuffer | null = null;
+    let texScratch: WebGLTexture | null = null;
+    let fboScratch: WebGLFramebuffer | null = null;
+
     const makeRenderTarget = (w: number, h: number) => {
       const tex = gl.createTexture()!;
       gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -209,7 +215,13 @@ const VisualizerGLCanvas: React.FC = () => {
       texPing = rtPing.tex; fboPing = rtPing.fbo;
       const rtPong = makeRenderTarget(w, h);
       texPong = rtPong.tex; fboPong = rtPong.fbo;
-    };
+
+      const rtLayer = makeRenderTarget(w, h);
+      texLayer = rtLayer.tex; fboLayer = rtLayer.fbo;
+      const rtScratch = makeRenderTarget(w, h);
+      texScratch = rtScratch.tex; fboScratch = rtScratch.fbo;
+  _code  new}</;
+
     resize();
 
     const onResize = () => resize();
@@ -369,6 +381,10 @@ void main(){
     const uSceneLoc = gl.getUniformLocation(progComposite, "uScene");
     const uBloomLoc = gl.getUniformLocation(progComposite, "uBloom");
     const uIntensityLoc = gl.getUniformLocation(progComposite, "uIntensity");
+
+    // Layer composite locations
+    const aPosLCLoc = gl.getAttribLocation(progLayerComposite, "aPos");
+    const aTexLCLoc = gl.getAttribLocation(prog");
 
     const count = Math.min(template.barCount ?? 64, 256);
     const indices = new Float32Array(count);
@@ -911,6 +927,14 @@ void main(){
           const col = hexToRGB(layer.color || "#ffffff");
           const isCircleMask = layer.mask && layer.mask.type === "circle";
           const appliedRect = applyRectMask(layer.mask, dpr);
+          const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
+
+          // Choose target framebuffer
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
 
           if (isCircleMask) {
             const cx = Math.floor(layer.mask.x * dpr);
@@ -948,6 +972,33 @@ void main(){
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
           }
           if (appliedRect) endMask();
+
+          if (specialBlend) {
+            // composite layer texture over scene according to mode
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            // swap scratch into scene
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+
+            // continue rendering to scene
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+          }
         } else if (layer.type === "image") {
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);
@@ -966,8 +1017,15 @@ void main(){
             ((x + w) / width) * 2 - 1, ((y + h) / height) * -2 + 1, 1, 1,
             (x / width) * 2 - 1, ((y + h) / height) * -2 + 1, 0, 1
           ]);
+
           const isCircleMask = layer.mask && layer.mask.type === "circle";
           const appliedRect = applyRectMask(layer.mask, dpr);
+          const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
 
           if (isCircleMask) {
             const cx = Math.floor(layer.mask.x * dpr);
@@ -1003,6 +1061,29 @@ void main(){
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
           }
           if (appliedRect) endMask();
+
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+          }
         } else if (layer.type === "shape") {
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);
@@ -1076,6 +1157,12 @@ void main(){
             push(x + Math.cos(a1) * r1, y + Math.sin(a1) * r1);
           }
           const col = hexToRGB(layer.color1 || "#ffffff");
+          const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
           gl.useProgram(progColor);
           gl.bindBuffer(gl.ARRAY_BUFFER, bufQuads);
           gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
@@ -1085,6 +1172,29 @@ void main(){
           gl.uniform3f(uColorLoc, col[0], col[1], col[2]);
           gl.uniform1f(uAlphaColorLoc, opacity);
           gl.drawArrays(gl.TRIANGLES, 0, segments * 6);
+
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+          }
         } else if (layer.type === "particles") {
           const key = layer.id || `p_${Math.random()}`;
           let parts = layerParticles.get(key);
@@ -1102,6 +1212,14 @@ void main(){
             positions[i * 2 + 0] = (p.x / width) * 2 - 1;
             positions[i * 2 + 1] = (p.y / height) * -2 + 1;
           }
+
+          const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
+
           gl.useProgram(progColor);
           gl.bindBuffer(gl.ARRAY_BUFFER, bufQuads);
           gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
@@ -1112,6 +1230,29 @@ void main(){
           gl.uniform3f(uColorLoc, col[0], col[1], col[2]);
           gl.uniform1f(uAlphaColorLoc, layer.opacity ?? 0.8);
           gl.drawArrays(gl.POINTS, 0, count);
+
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+          }
         }
       }
 
