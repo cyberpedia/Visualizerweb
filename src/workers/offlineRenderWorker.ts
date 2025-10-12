@@ -162,6 +162,8 @@ function drawWorkerOverlays(
     const size = template.albumArtSize ?? 96;
     const pad = 16;
     ctx.save();
+    // blend mode
+    (ctx as any).globalCompositeOperation = (template.albumArtBlendMode as any) || "source-over";
     // circular mask
     ctx.beginPath();
     ctx.arc(pad + size / 2, pad + size / 2, size / 2, 0, Math.PI * 2);
@@ -173,6 +175,7 @@ function drawWorkerOverlays(
 
   if (template.titleOverlay?.show && track.title) {
     ctx.save();
+    (ctx as any).globalCompositeOperation = (template.titleOverlay.blendMode as any) || "source-over";
     ctx.fillStyle = template.titleOverlay.color;
     ctx.font = `${template.titleOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
     ctx.textAlign = template.titleOverlay.align as CanvasTextAlign;
@@ -184,6 +187,7 @@ function drawWorkerOverlays(
 
   if (template.artistOverlay?.show && track.artist) {
     ctx.save();
+    (ctx as any).globalCompositeOperation = (template.artistOverlay.blendMode as any) || "source-over";
     ctx.fillStyle = template.artistOverlay.color;
     ctx.font = `${template.artistOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
     ctx.textAlign = template.artistOverlay.align as CanvasTextAlign;

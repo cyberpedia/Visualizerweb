@@ -217,6 +217,7 @@ const Exporter: React.FC = () => {
             pitchSemitones: exportSettings.pitchSemitones,
             onProgress: (p, phase) => setOfflineProgress({ p, phase }),
             signal: abortCtrlRef.current.signal,
+            normalizeAudio: exportSettings.normalizeAudio,
             encode: {
               crf: exportSettings.forceCrf ? exportSettings.crf : undefined,
               preset: exportSettings.preset,
@@ -571,6 +572,20 @@ const Exporter: React.FC = () => {
             <span
               className="ml-1 px-1 rounded bg-gray-800 text-gray-300"
               title="CRF vs Bitrate: CRF targets quality (lower=better, typical 18–24). Bitrate targets a fixed video data rate. Use CRF for quality-focused exports; use bitrate to control file size or streaming constraints."
+            >
+              ?
+            </span>
+          </label>
+          <label className="flex items-center gap-1 text-xs text-gray-300 ml-3">
+            <input
+              type="checkbox"
+              checked={!!exportSettings.normalizeAudio}
+              onChange={(e) => setExportSettings({ normalizeAudio: e.target.checked })}
+            />
+            Normalize audio
+            <span
+              className="ml-1 px-1 rounded bg-gray-800 text-gray-300"
+              title="RMS-based loudness normalization with peak limiting (offline only)."
             >
               ?
             </span>

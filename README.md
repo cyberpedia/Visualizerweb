@@ -37,9 +37,9 @@ Visualizers and overlays
 - Visualizers: Bars, Circle Spectrum, Waveform
 - Renderer selector: Canvas 2D or WebGL
 - Glow/bloom effect on GPU path with adjustable intensity
-- Overlays: album art, title, and artist text
+- Overlays: album art, title, and artist text (blend modes: source-over, lighter/add, multiply, screen)
 - Advanced template layers: text, image, shape, progress ring, particles
-- Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle) on Canvas/Offline paths; WebGL path supports additive plus experimental rect masks and multiply/screen for text/image layers
+- Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle/image) on Canvas/Offline paths; WebGL path supports additive and shader-based multiply/screen for overlays and layers with rect/circle/image masks
 - Keyframe timeline for animatable properties (x, y, opacity, size, rotation)
 - Template Gallery with defaults, user presets; template import/export (JSON)
 

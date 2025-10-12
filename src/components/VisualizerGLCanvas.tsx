@@ -1099,6 +1099,7 @@ void main(){
           ]);
           const col = hexToRGB(layer.color || "#ffffff");
           const isCircleMask = layer.mask && layer.mask.type === "circle";
+          const isImageMask = layer.mask && layer.mask.type === "image";
           const appliedRect = applyRectMask(layer.mask, dpr);
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
 
@@ -1305,6 +1306,13 @@ void main(){
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);
           const opacity = interpKF(layer.kf?.opacity, tSec, layer.opacity);
+          const appliedRect = applyRectMask(layer.mask, dpr);
+          const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
           if (layer.shape === "rect") {
             const w = layer.width ?? 100;
             const h = layer.height ?? 50;
@@ -1345,6 +1353,31 @@ void main(){
             gl.uniform3f(uColorLoc, col[0], col[1], col[2]);
             gl.uniform1f(uAlphaColorLoc, opacity);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, steps);
+          }
+
+          if (appliedRect) endMask();
+
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
           }
         } else if (layer.type === "progressRing") {
           const x = interpKF(layer.kf?.x, tSec, layer.x);

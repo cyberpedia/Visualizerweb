@@ -327,6 +327,36 @@ const LayerEditor: React.FC = () => {
                     <input
                       type="text"
                       value={(layer as any).mask?.src || ""}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, src: e.target.value } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                      placeholder="https://example.com/mask.png"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Pick file
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const url = URL.createObjectURL(f);
+                        updateLayer(layer.id, { mask: { ...(layer as any).mask, src: url } } as any);
+                      }}
+                    />
+                  </label>
+                  <div className="text-[11px] text-gray-400 col-span-3">
+                    The mask's alpha channel is used to clip the layer (destination-in). Ensure the mask aligns with the layer's bounds.
+                  </div>
+                </>
+              )}
+              {(layer as any).mask?.type === "image" && (
+                <>
+                  <label className="text-xs col-span-2">
+                    Mask image URL
+                    <input
+                      type="text"
+                      value={(layer as any).mask?.src || ""}
                       onChange={(e) => updateLayer(layer.id, { mask: { type: "image", src: e.target.value } } as any)}
                       className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                     />

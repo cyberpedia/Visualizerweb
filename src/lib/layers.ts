@@ -132,6 +132,8 @@ function drawImage(
   }
   ctx.drawImage(img, x, y, w, h);
   endMask(ctx, layer.mask);
+  // apply image mask after drawing if requested
+  applyImageMask(ctx, layer.mask, x, y, w, h);
   ctx.restore();
 }
 
@@ -147,9 +149,11 @@ function drawShape(
   ctx.globalAlpha = opacity;
   applyCommon(ctx, layer, x, y);
   applyMask(ctx, layer.mask);
+  let wRect = 100, hRect = 50;
   if (layer.shape === "rect") {
     const w = layer.width ?? 100;
     const h = layer.height ?? 50;
+    wRect = w; hRect = h;
     if (layer.fillGradient && (layer.fillGradient.from && layer.fillGradient.to)) {
       const grad = layer.fillGradient.horizontal
         ? ctx.createLinearGradient(x, y, x + w, y)
@@ -169,6 +173,7 @@ function drawShape(
     }
   } else if (layer.shape === "circle") {
     const r = layer.radius ?? 40;
+    wRect = r * 2; hRect = r * 2;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.closePath();
@@ -183,6 +188,8 @@ function drawShape(
     }
   }
   endMask(ctx, layer.mask);
+  // apply image mask after drawing if requested
+  applyImageMask(ctx, layer.mask, x, y, wRect, hRect);
   ctx.restore();
 }
 
@@ -221,6 +228,8 @@ function drawProgressRing(
   ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
   ctx.stroke();
   endMask(ctx, layer.mask);
+  // image mask centered around ring bounds
+  applyImageMask(ctx, layer.mask, x - radius, y - radius, radius * 2, radius * 2);
   ctx.restore();
 }
 
@@ -257,6 +266,8 @@ function drawParticles(
     ctx.fill();
   }
   endMask(ctx, layer.mask);
+  // image mask across full canvas if specified
+  applyImageMask(ctx, layer.mask, 0, 0, width, height);
   ctx.restore();
 }
 

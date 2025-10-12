@@ -23,6 +23,7 @@ export type OfflineExportOptions = {
   template: TemplateConfig;
   outputType?: "video" | "audio";
   pitchSemitones?: number;
+  normalizeAudio?: boolean;
   onProgress?: (p: number, phase: "capture" | "encode") => void;
   signal?: AbortSignal;
   encode?: {
@@ -965,7 +966,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
   if (decoded) {
     const semis = (opts as any).pitchSemitones;
     let pcmToUse = (typeof semis === "number") ? pitchShiftPhaseVocoder(decoded.pcm, semis) : decoded.pcm;
-    if ((opts as any).encode && (opts as any).normalizeAudio) {
+    if (opts.normalizeAudio) {
       pcmToUse = normalizePCM(pcmToUse);
     }
     const wav = pcmToWavBytes(pcmToUse, decoded.sampleRate);
