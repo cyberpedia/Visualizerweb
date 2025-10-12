@@ -220,7 +220,7 @@ const VisualizerGLCanvas: React.FC = () => {
       texLayer = rtLayer.tex; fboLayer = rtLayer.fbo;
       const rtScratch = makeRenderTarget(w, h);
       texScratch = rtScratch.tex; fboScratch = rtScratch.fbo;
-  _code  new}</;
+    };
 
     resize();
 
@@ -261,7 +261,7 @@ void main() {
     }
 
     // SDF text shader (crisp scalable text)
-    const FS_SDF = `
+const FS_SDF = `
 precision mediump float;
 varying vec2 vTex;
 uniform sampler2D uTex;
@@ -274,9 +274,41 @@ void main(){
   gl_FragColor = vec4(uTextColor, a * uAlpha);
 }
 `;
+
+// Image-mask variants (alpha of mask texture multiplies output alpha)
+const FS_TEX_IMG_MASK = `
+precision mediump float;
+varying vec2 vTex;
+uniform sampler2D uTex;
+uniform sampler2D uMask;
+uniform float uAlpha;
+void main(){
+  vec4 c = texture2D(uTex, vTex);
+  float m = texture2D(uMask, vTex).a;
+  gl_FragColor = vec4(c.rgb, c.a * uAlpha * m);
+}
+`;
+
+const FS_SDF_IMG_MASK = `
+precision mediump float;
+varying vec2 vTex;
+uniform sampler2D uTex;
+uniform sampler2D uMask;
+uniform vec3 uTextColor;
+uniform float uAlpha;
+void main(){
+  float dSdf = texture2D(uTex, vTex).a;
+  float a = smoothstep(0.5 - 0.12, 0.5 + 0.12, dSdf);
+  float m = texture2D(uMask, vTex).a;
+  gl_FragColor = vec4(uTextColor, a * uAlpha * m);
+}
+`;
+
     const progSDF = createProgram(gl, VS_TEX, FS_SDF);
     const progTexMask = createProgram(gl, VS_TEX, FS_TEX_MASK);
     const progSDFMask = createProgram(gl, VS_TEX, FS_SDF_MASK);
+    const progTexImgMask = createProgram(gl, VS_TEX, FS_TEX_IMG_MASK);
+    const progSDFImgMask = createProgram(gl, VS_TEX, FS_SDF_IMG_MASK);
 
     // Fullscreen quad + postprocessing (blur + composite bloom)
     const VS_QUAD = `
@@ -324,8 +356,36 @@ void main(){
   gl_FragColor = vec4(color, 1.0);
 }
 `;
+
+// Layer compositing shader: source-over, multiply, screen
+const FS_LAYER_COMPOSITE = `
+precision mediump float;
+varying vec2 vTex;
+uniform sampler2D uScene;
+uniform sampler2D uLayer;
+uniform int uMode; // 0=source-over, 1=multiply, 2=screen
+void main(){
+  vec4 scene = texture2D(uScene, vTex);
+  vec4 layer = texture2D(uLayer, vTex);
+  vec3 outColor;
+  if (uMode == 1) {
+    // multiply
+    vec3 mul = scene.rgb * layer.rgb;
+    outColor = mix(scene.rgb, mul, layer.a);
+  } else if (uMode == 2) {
+    // screen: 1 - (1-a)(1-b)
+    vec3 scr = 1.0 - (1.0 - scene.rgb) * (1.0 - layer.rgb);
+    outColor = mix(scene.rgb, scr, layer.a);
+  } else {
+    // source-over: layer over scene
+    outColor = layer.rgb * layer.a + scene.rgb * (1.0 - layer.a);
+  }
+  gl_FragColor = vec4(outColor, 1.0);
+}
+`;
     const progBlur = createProgram(gl, VS_QUAD, FS_BLUR);
     const progComposite = createProgram(gl, VS_QUAD, FS_COMPOSITE);
+    const progLayerComposite = createProgram(gl, VS_QUAD, FS_LAYER_COMPOSITE);
 
     const aIndexLoc = gl.getAttribLocation(progPoints, "aIndex");
     const uCountLoc = gl.getUniformLocation(progPoints, "uCount");
@@ -354,6 +414,13 @@ void main(){
     const uCenterTexLoc = gl.getUniformLocation(progTexMask, "uCenter");
     const uRadiusTexLoc = gl.getUniformLocation(progTexMask, "uRadius");
 
+    // Image mask uniforms
+    const aPosTexImgMaskLoc = gl.getAttribLocation(progTexImgMask, "aPos");
+    const aTexTexImgMaskLoc = gl.getAttribLocation(progTexImgMask, "aTex");
+    const uAlphaTexImgMaskLoc = gl.getUniformLocation(progTexImgMask, "uAlpha");
+    const uSamplerTexImgLoc = gl.getUniformLocation(progTexImgMask, "uTex");
+    const uSamplerMaskImgLoc = gl.getUniformLocation(progTexImgMask, "uMask");
+
     // SDF text locations
     const aPosSDFLoc = gl.getAttribLocation(progSDF, "aPos");
     const aTexSDFLoc = gl.getAttribLocation(progSDF, "aTex");
@@ -370,6 +437,14 @@ void main(){
     const uCenterSDFLoc = gl.getUniformLocation(progSDFMask, "uCenter");
     const uRadiusSDFLoc = gl.getUniformLocation(progSDFMask, "uRadius");
 
+    // SDF image mask uniforms
+    const aPosSDFImgMaskLoc = gl.getAttribLocation(progSDFImgMask, "aPos");
+    const aTexSDFImgMaskLoc = gl.getAttribLocation(progSDFImgMask, "aTex");
+    const uSamplerSDFImgMaskLoc = gl.getUniformLocation(progSDFImgMask, "uTex");
+    const uSamplerMaskSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uMask");
+    const uTextColorSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uTextColor");
+    const uAlphaSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uAlpha");
+
     // Blur/composite locations
     const aPosQuadLoc = gl.getAttribLocation(progBlur, "aPos");
     const aTexQuadLoc = gl.getAttribLocation(progBlur, "aTex");
@@ -384,7 +459,10 @@ void main(){
 
     // Layer composite locations
     const aPosLCLoc = gl.getAttribLocation(progLayerComposite, "aPos");
-    const aTexLCLoc = gl.getAttribLocation(prog");
+    const aTexLCLoc = gl.getAttribLocation(progLayerComposite, "aTex");
+    const uSceneLCLoc = gl.getUniformLocation(progLayerComposite, "uScene");
+    const uLayerLCLoc = gl.getUniformLocation(progLayerComposite, "uLayer");
+    const uModeLCLoc = gl.getUniformLocation(progLayerComposite, "uMode");
 
     const count = Math.min(template.barCount ?? 64, 256);
     const indices = new Float32Array(count);
@@ -813,18 +891,55 @@ void main(){
             ((x + w) / width) * 2 - 1, ((y + h) / height) * -2 + 1, 1, 1,
             (x / width) * 2 - 1, ((y + h) / height) * -2 + 1, 0, 1
           ]);
-          gl.useProgram(progTex);
+
+          const specialBlend = template.albumArtBlendMode === "multiply" || template.albumArtBlendMode === "screen";
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
+
+          // Circle mask by default
+          const cx = Math.floor((x + w / 2) * dpr);
+          const cy = Math.floor((height - (y + h / 2)) * dpr);
+          const rad = Math.max(1, Math.floor((Math.min(w, h) / 2) * dpr));
+          gl.useProgram(progTexMask);
           gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
           gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
-          gl.enableVertexAttribArray(aPosTexLoc);
-          gl.vertexAttribPointer(aPosTexLoc, 2, gl.FLOAT, false, 16, 0);
-          gl.enableVertexAttribArray(aTexLoc);
-          gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, false, 16, 8);
+          gl.enableVertexAttribArray(aPosTexMaskLoc);
+          gl.vertexAttribPointer(aPosTexMaskLoc, 2, gl.FLOAT, false, 16, 0);
+          gl.enableVertexAttribArray(aTexMaskLoc);
+          gl.vertexAttribPointer(aTexMaskLoc, 2, gl.FLOAT, false, 16, 8);
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, texInfo.tex);
-          gl.uniform1i(uSamplerLoc, 0);
-          gl.uniform1f(uAlphaTexLoc, 1.0);
+          gl.uniform1i(uSamplerTexMaskLoc, 0);
+          gl.uniform1f(uAlphaTexMaskLoc, 1.0);
+          gl.uniform2f(uCenterTexLoc, cx, cy);
+          gl.uniform1f(uRadiusTexLoc, rad);
           gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+          if (specialBlend) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, template.albumArtBlendMode === "multiply" ? 1 : 2);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+          }
         }
       }
 
@@ -840,6 +955,12 @@ void main(){
           (x / width) * 2 - 1, ((y + h) / height) * -2 + 1, 0, 1
         ]);
         const col = hexToRGB(template.titleOverlay.color ?? "#ffffff");
+        const specialBlend = template.titleOverlay.blendMode === "multiply" || template.titleOverlay.blendMode === "screen";
+        if (specialBlend) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+        }
         gl.useProgram(progSDF);
         gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
         gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
@@ -853,6 +974,29 @@ void main(){
         gl.uniform3f(uTextColorLoc, col[0], col[1], col[2]);
         gl.uniform1f(uAlphaSDFLoc, 1.0);
         gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+        if (specialBlend) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+          gl.useProgram(progLayerComposite);
+          gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+          gl.enableVertexAttribArray(aPosLCLoc);
+          gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+          gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+          gl.enableVertexAttribArray(aTexLCLoc);
+          gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, texScene!);
+          gl.uniform1i(uSceneLCLoc, 0);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+          gl.uniform1i(uLayerLCLoc, 1);
+          gl.uniform1i(uModeLCLoc, template.titleOverlay.blendMode === "multiply" ? 1 : 2);
+          gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+          const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+          const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+        }
       }
       if (template.artistOverlay?.show && artist) {
         const t = makeTextureFromText(artist, template.artistOverlay.color, template.artistOverlay.size);
@@ -865,6 +1009,12 @@ void main(){
           (x / width) * 2 - 1, ((y + h) / height) * -2 + 1, 0, 1
         ]);
         const col = hexToRGB(template.artistOverlay.color ?? "#cbd5e1");
+        const specialBlend = template.artistOverlay.blendMode === "multiply" || template.artistOverlay.blendMode === "screen";
+        if (specialBlend) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+        }
         gl.useProgram(progSDF);
         gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
         gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
@@ -878,6 +1028,29 @@ void main(){
         gl.uniform3f(uTextColorLoc, col[0], col[1], col[2]);
         gl.uniform1f(uAlphaSDFLoc, 1.0);
         gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+        if (specialBlend) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+          gl.useProgram(progLayerComposite);
+          gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+          gl.enableVertexAttribArray(aPosLCLoc);
+          gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+          gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+          gl.enableVertexAttribArray(aTexLCLoc);
+          gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, texScene!);
+          gl.uniform1i(uSceneLCLoc, 0);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+          gl.uniform1i(uLayerLCLoc, 1);
+          gl.uniform1i(uModeLCLoc, template.artistOverlay.blendMode === "multiply" ? 1 : 2);
+          gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+          const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+          const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+        }
       }
 
       // Layers (basic GPU support: text, image, rect/circle, progress ring, particles)
@@ -956,6 +1129,28 @@ void main(){
             gl.uniform2f(uCenterSDFLoc, cx, cy);
             gl.uniform1f(uRadiusSDFLoc, rad);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          } else if (isImageMask && layer.mask.src) {
+            const mInfo = imageCache.get(layer.mask.src) || null;
+            if (!mInfo) {
+              void makeTextureFromImage(layer.mask.src);
+            } else {
+              gl.useProgram(progSDFImgMask);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+              gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+              gl.enableVertexAttribArray(aPosSDFImgMaskLoc);
+              gl.vertexAttribPointer(aPosSDFImgMaskLoc, 2, gl.FLOAT, false, 16, 0);
+              gl.enableVertexAttribArray(aTexSDFImgMaskLoc);
+              gl.vertexAttribPointer(aTexSDFImgMaskLoc, 2, gl.FLOAT, false, 16, 8);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+              gl.uniform1i(uSamplerSDFImgMaskLoc, 0);
+              gl.activeTexture(gl.TEXTURE1);
+              gl.bindTexture(gl.TEXTURE_2D, mInfo.tex);
+              gl.uniform1i(uSamplerMaskSDFImgLoc, 1);
+              gl.uniform3f(uTextColorSDFImgLoc, col[0], col[1], col[2]);
+              gl.uniform1f(uAlphaSDFImgLoc, opacity);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+            }
           } else {
             gl.useProgram(progSDF);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
@@ -1019,6 +1214,7 @@ void main(){
           ]);
 
           const isCircleMask = layer.mask && layer.mask.type === "circle";
+          const isImageMask = layer.mask && layer.mask.type === "image";
           const appliedRect = applyRectMask(layer.mask, dpr);
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
           if (specialBlend) {
@@ -1046,6 +1242,27 @@ void main(){
             gl.uniform2f(uCenterTexLoc, cx, cy);
             gl.uniform1f(uRadiusTexLoc, rad);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+          } else if (isImageMask && layer.mask.src) {
+            const mInfo = imageCache.get(layer.mask.src) || null;
+            if (!mInfo) {
+              void makeTextureFromImage(layer.mask.src);
+            } else {
+              gl.useProgram(progTexImgMask);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+              gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+              gl.enableVertexAttribArray(aPosTexImgMaskLoc);
+              gl.vertexAttribPointer(aPosTexImgMaskLoc, 2, gl.FLOAT, false, 16, 0);
+              gl.enableVertexAttribArray(aTexTexImgMaskLoc);
+              gl.vertexAttribPointer(aTexTexImgMaskLoc, 2, gl.FLOAT, false, 16, 8);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, texInfo.tex);
+              gl.uniform1i(uSamplerTexImgLoc, 0);
+              gl.activeTexture(gl.TEXTURE1);
+              gl.bindTexture(gl.TEXTURE_2D, mInfo.tex);
+              gl.uniform1i(uSamplerMaskImgLoc, 1);
+              gl.uniform1f(uAlphaTexImgMaskLoc, opacity);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+            }
           } else {
             gl.useProgram(progTex);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
@@ -1309,7 +1526,7 @@ void main(){
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
     };
-  }, [analyzer, template.renderer, template.type, template.color1, template.color2, template.glowStrength, template.titleOverlay?.show, template.artistOverlay?.show, exportActive, exportSettings.mode, exportSettings.width, exportSettings.height]);
+  }, [analyzer, template.renderer, template.type, template.color1, template.color2, template.glowStrength, template.titleOverlay?.show, template.artistOverlay?.show, template.titleOverlay?.blendMode, template.artistOverlay?.blendMode, template.albumArtBlendMode, exportActive, exportSettings.mode, exportSettings.width, exportSettings.height]);
 
   return (
     <div className="canvas-container h-[55vh] md:h-[60vh] lg:h-[65vh] xl:h-[70vh]">

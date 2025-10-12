@@ -29,6 +29,17 @@ self.onmessage = async (e: MessageEvent<DecodeMsg | { type: "abort" }>) => {
   if (data.type !== "decode") return;
 
   const { bytes, url, fps, width, height } = data as DecodeMsg;
+
+  // Attempt WebCodecs path (not implemented for container demux yet)
+  const hasWebCodecs = typeof (self as any).VideoDecoder !== "undefined";
+  if (hasWebCodecs) {
+    try {
+      // Inform host that WebCodecs is available but falling back for container decode
+      // @ts-ignore
+      postMessage({ type: "info", message: "WebCodecs available; using ffmpeg.wasm fallback for container demux." });
+    } catch {}
+  }
+
   try {
     const ffmpeg = createFFmpeg({ log: false });
     await ffmpeg.load();

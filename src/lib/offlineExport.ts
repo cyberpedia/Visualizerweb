@@ -935,9 +935,39 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
 
   // Prepare audio input: prefer PCM->WAV with phase vocoder if pitch requested
   let audioInputName: string | null = null;
+
+  const normalizePCM = (pcm: Float32Array): Float32Array => {
+    let sumSq = 0;
+    for (let i = 0; i < pcm.length; i++) {
+      sumSq += pcm[i] * pcm[i];
+    }
+    const rms = Math.sqrt(sumSq / Math.max(1, pcm.length));
+    const target = 0.2; // target RMS (~-14 to -16 LUFS rough)
+    let factor = rms > 1e-6 ? target / rms : 1.0;
+    // clamp scaling
+    factor = Math.max(0.2, Math.min(5.0, factor));
+    const out = new Float32Array(pcm.length);
+    let peak = 0;
+    for (let i = 0; i < pcm.length; i++) {
+      const v = pcm[i] * factor;
+      out[i] = v;
+      const ap = Math.abs(v);
+      if (ap > peak) peak = ap;
+    }
+    // if clipped, soft scale down to 0.98
+    if (peak > 0.98) {
+      const k = 0.98 / peak;
+      for (let i = 0; i < out.length; i++) out[i] *= k;
+    }
+    return out;
+  };
+
   if (decoded) {
     const semis = (opts as any).pitchSemitones;
-    const pcmToUse = (typeof semis === "number") ? pitchShiftPhaseVocoder(decoded.pcm, semis) : decoded.pcm;
+    let pcmToUse = (typeof semis === "number") ? pitchShiftPhaseVocoder(decoded.pcm, semis) : decoded.pcm;
+    if ((opts as any).encode && (opts as any).normalizeAudio) {
+      pcmToUse = normalizePCM(pcmToUse);
+    }
     const wav = pcmToWavBytes(pcmToUse, decoded.sampleRate);
     audioInputName = "audio.wav";
     ffmpeg.FS("writeFile", audioInputName, wav);

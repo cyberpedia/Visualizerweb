@@ -188,6 +188,31 @@ export class AudioEngine {
     }
   }
 
+  setCompressorPreset(preset: "light" | "medium" | "strong") {
+    if (!this.compressor) return;
+    const c = this.compressor;
+    if (preset === "light") {
+      c.threshold.value = -18;
+      c.knee.value = 15;
+      c.ratio.value = 2;
+      c.attack.value = 0.005;
+      c.release.value = 0.3;
+    } else if (preset === "strong") {
+      c.threshold.value = -28;
+      c.knee.value = 10;
+      c.ratio.value = 6;
+      c.attack.value = 0.003;
+      c.release.value = 0.25;
+    } else {
+      // medium (default)
+      c.threshold.value = -22;
+      c.knee.value = 12;
+      c.ratio.value = 4;
+      c.attack.value = 0.004;
+      c.release.value = 0.28;
+    }
+  }
+
   setReverb(on: boolean) {
     if (!this.wetGain || !this.dryGain) return;
     this.wetGain.gain.value = on ? (this.wetGain.gain.value || 0.25) : 0.0;

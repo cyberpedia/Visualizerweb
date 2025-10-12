@@ -260,7 +260,7 @@ function endMask(ctx: OffscreenCanvasRenderingContext2D, mask?: any) {
   ctx.restore();
 }
 
-function drawWorkerLayers(
+async function drawWorkerLayers(
   ctx: OffscreenCanvasRenderingContext2D,
   width: number,
   height: number,
@@ -268,7 +268,8 @@ function drawWorkerLayers(
   time: number,
   duration: number,
   beatPulse: number,
-  layerBitmaps: Map<string, ImageBitmap>
+  layerBitmaps: Map<string, ImageBitmap>,
+  maskCache: Map<string, ImageBitmap>
 ) {
   const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
   for (const layer of layers as any[]) {
@@ -294,6 +295,22 @@ function drawWorkerLayers(
         }
         ctx.fillText(l.text, x, y);
         endMask(ctx, l.mask);
+        // image mask post-pass
+        if (l.mask && l.mask.type === "image" && l.mask.src) {
+          let m = maskCache.get(l.mask.src) || null;
+          if (!m) {
+            m = await fetchBitmapFromURL(l.mask.src);
+            if (m) maskCache.set(l.mask.src, m);
+          }
+          if (m) {
+            const prev = ctx.globalCompositeOperation;
+            ctx.globalCompositeOperation = "destination-in";
+            const w = Math.ceil((ctx as any).measureText(l.text).width || size);
+            const h = Math.ceil(size * 1.3);
+            ctx.drawImage(m, x, y - size * 0.05, w, h);
+            ctx.globalCompositeOperation = prev;
+          }
+        }
         ctx.restore();
         break;
       }
@@ -320,6 +337,19 @@ function drawWorkerLayers(
         }
         ctx.drawImage(bmp, x, y, w, h);
         endMask(ctx, l.mask);
+        if (l.mask && l.mask.type === "image" && l.mask.src) {
+          let m = maskCache.get(l.mask.src) || null;
+          if (!m) {
+            m = await fetchBitmapFromURL(l.mask.src);
+            if (m) maskCache.set(l.mask.src, m);
+          }
+          if (m) {
+            const prev = ctx.globalCompositeOperation;
+            ctx.globalCompositeOperation = "destination-in";
+            ctx.drawImage(m, x, y, w, h);
+            ctx.globalCompositeOperation = prev;
+          }
+        }
         ctx.restore();
         break;
       }
@@ -332,9 +362,11 @@ function drawWorkerLayers(
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
         applyMask(ctx, l.mask);
+        let wRect = 100, hRect = 50;
         if (l.shape === "rect") {
           const w = l.width ?? 100;
           const h = l.height ?? 50;
+          wRect = w; hRect = h;
           if (l.fillGradient && (l.fillGradient.from && l.fillGradient.to)) {
             const grad = l.fillGradient.horizontal
               ? ctx.createLinearGradient(x, y, x + w, y)
@@ -354,6 +386,7 @@ function drawWorkerLayers(
           }
         } else if (l.shape === "circle") {
           const r = l.radius ?? 40;
+          wRect = r * 2; hRect = r * 2;
           ctx.beginPath();
           ctx.arc(x, y, r, 0, Math.PI * 2);
           ctx.closePath();
@@ -368,6 +401,19 @@ function drawWorkerLayers(
           }
         }
         endMask(ctx, l.mask);
+        if (l.mask && l.mask.type === "image" && l.mask.src) {
+          let m = maskCache.get(l.mask.src) || null;
+          if (!m) {
+            m = await fetchBitmapFromURL(l.mask.src);
+            if (m) maskCache.set(l.mask.src, m);
+          }
+          if (m) {
+            const prev = ctx.globalCompositeOperation;
+            ctx.globalCompositeOperation = "destination-in";
+            ctx.drawImage(m, x, y, wRect, hRect);
+            ctx.globalCompositeOperation = prev;
+          }
+        }
         ctx.restore();
         break;
       }
@@ -390,6 +436,19 @@ function drawWorkerLayers(
         ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
         ctx.stroke();
         endMask(ctx, l.mask);
+        if (l.mask && l.mask.type === "image" && l.mask.src) {
+          let m = maskCache.get(l.mask.src) || null;
+          if (!m) {
+            m = await fetchBitmapFromURL(l.mask.src);
+            if (m) maskCache.set(l.mask.src, m);
+          }
+          if (m) {
+            const prev = ctx.globalCompositeOperation;
+            ctx.globalCompositeOperation = "destination-in";
+            ctx.drawImage(m, x - radius, y - radius, radius * 2, radius * 2);
+            ctx.globalCompositeOperation = prev;
+          }
+        }
         ctx.restore();
         break;
       }
@@ -442,6 +501,7 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
   let bgBitmap: ImageBitmap | null = null;
   let artBitmap: ImageBitmap | null = null;
   const layerBitmaps = new Map<string, ImageBitmap>();
+  const maskCache = new Map<string, ImageBitmap>();
   const bgFrameBytes = new Map<number, ArrayBuffer>();
   const bgFrameBitmaps = new Map<number, ImageBitmap>();
 
@@ -627,7 +687,7 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
 
     // layers
     const duration = (frameCount / fps);
-    drawWorkerLayers(ctx, width, height, template, tSec, duration, pulse, layerBitmaps);
+    await drawWorkerLayers(ctx, width, height, template, tSec, duration, pulse, layerBitmaps, maskCache);
 
     // convert to PNG bytes and post
     const blob = await canvas.convertToBlob({ type: "image/png" });

@@ -15,6 +15,8 @@ export type Track = {
 
 export type VisualizerType = "bars" | "circle" | "waveform";
 
+export type BlendModeBasic = "source-over" | "lighter" | "multiply" | "screen";
+
 export type TitleOverlay = {
   show: boolean;
   color: string;
@@ -22,6 +24,7 @@ export type TitleOverlay = {
   x: number; // px
   y: number; // px from top
   align: "left" | "center" | "right";
+  blendMode?: BlendModeBasic;
 };
 
 export type ArtistOverlay = {
@@ -31,6 +34,7 @@ export type ArtistOverlay = {
   x: number;
   y: number;
   align: "left" | "center" | "right";
+  blendMode?: BlendModeBasic;
 };
 
 export type Easing = "linear" | "easeIn" | "easeOut" | "easeInOut";
@@ -38,7 +42,8 @@ export type KeyframeNumber = { time: number; value: number; easing?: Easing };
 
 export type Mask =
   | { type: "rect"; x: number; y: number; width: number; height: number }
-  | { type: "circle"; x: number; y: number; radius: number };
+  | { type: "circle"; x: number; y: number; radius: number }
+  | { type: "image"; src: string };
 
 export type BaseLayer = {
   id: string;
@@ -126,6 +131,7 @@ export type TemplateConfig = {
   showInfo?: boolean;
   showAlbumArt?: boolean;
   albumArtSize?: number; // px
+  albumArtBlendMode?: BlendModeBasic;
   barCount?: number;
   circle?: {
     radius: number;
@@ -149,6 +155,7 @@ export type ExportSettings = {
   engine?: "realtime" | "offline"; // realtime MediaRecorder(WebM) or offline ffmpeg.wasm(MP4)
   outputType?: "video" | "audio"; // audio-only export option
   pitchSemitones?: number; // offline pitch shift (semitones)
+  normalizeAudio?: boolean; // offline loudness normalization
   // Encoding options (offline engine)
   forceCrf?: boolean;
   crf?: number; // 0..51, lower = higher quality
@@ -180,6 +187,7 @@ type PlayerState = {
   playbackRate: number; // 0.5..2
   pan: number; // -1..1
   compressorOn: boolean;
+  compressorPreset: "light" | "medium" | "strong";
   limiterOn: boolean;
   reverbOn: boolean;
   reverbWet: number; // 0..1
@@ -208,6 +216,7 @@ type PlayerState = {
   setPlaybackRate: (r: number) => void;
   setPan: (p: number) => void;
   setCompressorOn: (on: boolean) => void;
+  setCompressorPreset: (p: "light" | "medium" | "strong") => void;
   setLimiterOn: (on: boolean) => void;
   setReverbOn: (on: boolean) => void;
   setReverbWet: (wet: number) => void;
@@ -243,6 +252,7 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
   showInfo: true,
   showAlbumArt: true,
   albumArtSize: 96,
+  albumArtBlendMode: "source-over",
   barCount: 64,
   circle: { radius: 160, thickness: 8, gap: 2 },
   waveform: { thickness: 2 },
@@ -252,7 +262,8 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
     size: 16,
     x: 20,
     y: 30,
-    align: "left"
+    align: "left",
+    blendMode: "source-over"
   },
   artistOverlay: {
     show: true,
@@ -260,7 +271,8 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
     size: 13,
     x: 20,
     y: 50,
-    align: "left"
+    align: "left",
+    blendMode: "source-over"
   },
   layers: []
 };
@@ -271,6 +283,8 @@ const DEFAULT_EXPORT: ExportSettings = {
   bitrate: 4_000_000,
   engine: "realtime",
   outputType: "video",
+  pitchSemitones: 0,
+  normalizeAudio: false,
   forceCrf: false,
   crf: 23,
   preset: "veryfast",
@@ -294,6 +308,7 @@ export const usePlayerStore = create<PlayerState>()(
       playbackRate: 1,
       pan: 0,
       compressorOn: false,
+      compressorPreset: "medium",
       limiterOn: false,
       reverbOn: false,
       reverbWet: 0.25,
@@ -367,6 +382,7 @@ export const usePlayerStore = create<PlayerState>()(
       setPan: (p) => set(() => ({ pan: Math.min(1, Math.max(-1, p)) })),
       setCompressorOn: (on) => set(() => ({ compressorOn: !!on })),
       setLimiterOn: (on) => set(() => ({ limiterOn: !!on })),
+      setCompressorPreset: (p) => set(() => ({ compressorPreset: p })),
       setReverbOn: (on) => set(() => ({ reverbOn: !!on })),
       setReverbWet: (wet) => set(() => ({ reverbWet: Math.min(1, Math.max(0, wet)) })),
       setEqGain: (band, db) =>
@@ -486,6 +502,7 @@ export const usePlayerStore = create<PlayerState>()(
         playbackRate: s.playbackRate,
         pan: s.pan,
         compressorOn: s.compressorOn,
+        compressorPreset: s.compressorPreset,
         limiterOn: s.limiterOn,
         reverbOn: s.reverbOn,
         reverbWet: s.reverbWet,

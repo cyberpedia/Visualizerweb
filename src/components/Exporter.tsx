@@ -21,6 +21,7 @@ const Exporter: React.FC = () => {
   const [showPresets, setShowPresets] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
   const [showPlatformTips, setShowPlatformTips] = useState(false);
+  const [engineHint, setEngineHint] = useState<string>("");
 
   const addPreset = usePlayerStore((s) => s.addExportPreset);
   const exportPresetsList = usePlayerStore((s) => s.exportPresets);
@@ -175,6 +176,17 @@ const Exporter: React.FC = () => {
   };
 
   useEffect(() => {
+    // Auto-fallback for Safari/iOS: use offline export for best compatibility
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+    if ((isIOS || isSafari) && exportSettings.engine === "realtime" && (exportSettings.outputType ?? "video") === "video") {
+      setExportSettings({ engine: "offline" });
+      setEngineHint("Safari/iOS detected: switched export engine to Offline (MP4) for compatibility.");
+    } else {
+      setEngineHint("");
+    }
+
     if (!exportActive) return;
 
     if (exportSettings.engine === "offline") {
@@ -324,6 +336,11 @@ const Exporter: React.FC = () => {
       >
         {exportActive ? "Stop Export" : (exportSettings.outputType === "audio" ? "Export Audio" : "Export Video")}
       </button>
+      {engineHint && (
+        <span className="px-2 py-1 rounded bg-blue-800 text-blue-100 text-xs" title={engineHint}>
+          {engineHint}
+        </span>
+      )}
       {(() => {
         const warnings = computeWarnings();
         return warnings.length > 0 ? (

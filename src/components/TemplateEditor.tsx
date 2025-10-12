@@ -72,7 +72,7 @@ const TemplateEditor: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-3 grid grid-cols-2 gap-3">
+      <div className="mb-3 grid grid-cols-3 gap-3">
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -93,6 +93,20 @@ const TemplateEditor: React.FC = () => {
             className="w-full accent-brand-500"
           />
         </div>
+        <label className="text-xs">
+          Blend
+          <select
+            value={template.albumArtBlendMode ?? "source-over"}
+            onChange={(e) => set({ albumArtBlendMode: e.target.value })}
+            className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm w-full"
+            title="Album art blend mode"
+          >
+            <option value="source-over">source-over</option>
+            <option value="lighter">lighter (add)</option>
+            <option value="multiply">multiply</option>
+            <option value="screen">screen</option>
+          </select>
+        </label>
       </div>
 
       {template.type === "bars" && (
@@ -304,6 +318,19 @@ const TemplateEditor: React.FC = () => {
               <option value="center">center</option>
               <option value="right">right</option>
             </select>
+            <select
+              value={template.titleOverlay?.blendMode ?? "source-over"}
+              onChange={(e) =>
+                set({ titleOverlay: { ...template.titleOverlay, blendMode: e.target.value as any } })
+              }
+              className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm"
+              title="Blend mode"
+            >
+              <option value="source-over">source-over</option>
+              <option value="lighter">lighter (add)</option>
+              <option value="multiply">multiply</option>
+              <option value="screen">screen</option>
+            </select>
           </div>
         </div>
 
@@ -363,6 +390,19 @@ const TemplateEditor: React.FC = () => {
               <option value="left">left</option>
               <option value="center">center</option>
               <option value="right">right</option>
+            </select>
+            <select
+              value={template.artistOverlay?.blendMode ?? "source-over"}
+              onChange={(e) =>
+                set({ artistOverlay: { ...template.artistOverlay, blendMode: e.target.value as any } })
+              }
+              className="bg-gray-900 border border-gray-800 rounded px-2 py-1 text-sm"
+              title="Blend mode"
+            >
+              <option value="source-over">source-over</option>
+              <option value="lighter">lighter (add)</option>
+              <option value="multiply">multiply</option>
+              <option value="screen">screen</option>
             </select>
           </div>
         </div>

@@ -47,6 +47,8 @@ export function drawOverlays(
       const pad = 16;
       img.onload = () => {
         ctx.save();
+        // compositing
+        ctx.globalCompositeOperation = template.albumArtBlendMode || "source-over";
         // circular mask
         ctx.beginPath();
         ctx.arc(pad + size / 2, pad + size / 2, size / 2, 0, Math.PI * 2);
@@ -61,9 +63,10 @@ export function drawOverlays(
   // title overlay
   if (template.titleOverlay?.show && track.title) {
     ctx.save();
+    ctx.globalCompositeOperation = template.titleOverlay.blendMode || "source-over";
     ctx.fillStyle = template.titleOverlay.color;
     ctx.font = `${template.titleOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
-    ctx.textAlign = template.titleOverlay.align;
+    ctx.textAlign = template.titleOverlay.align as any;
     const x = template.titleOverlay.x;
     const y = template.titleOverlay.y;
     ctx.fillText(track.title, x, y);
@@ -73,9 +76,10 @@ export function drawOverlays(
   // artist overlay
   if (template.artistOverlay?.show && track.artist) {
     ctx.save();
+    ctx.globalCompositeOperation = template.artistOverlay.blendMode || "source-over";
     ctx.fillStyle = template.artistOverlay.color;
     ctx.font = `${template.artistOverlay.size}px system-ui, -apple-system, Segoe UI, Roboto`;
-    ctx.textAlign = template.artistOverlay.align;
+    ctx.textAlign = template.artistOverlay.align as any;
     const x = template.artistOverlay.x;
     const y = template.artistOverlay.y;
     ctx.fillText(track.artist, x, y);

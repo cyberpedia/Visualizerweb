@@ -239,12 +239,14 @@ const LayerEditor: React.FC = () => {
                     if (val === "none") updateLayer(layer.id, { mask: undefined } as any);
                     else if (val === "rect") updateLayer(layer.id, { mask: { type: "rect", x: layer.x, y: layer.y, width: 100, height: 50 } } as any);
                     else if (val === "circle") updateLayer(layer.id, { mask: { type: "circle", x: layer.x, y: layer.y, radius: 40 } } as any);
+                    else if (val === "image") updateLayer(layer.id, { mask: { type: "image", src: "" } } as any);
                   }}
                   className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                 >
                   <option value="none">none</option>
                   <option value="rect">rect</option>
                   <option value="circle">circle</option>
+                  <option value="image">image</option>
                 </select>
               </label>
               {(layer as any).mask?.type === "rect" && (
@@ -316,6 +318,35 @@ const LayerEditor: React.FC = () => {
                       className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                     />
                   </label>
+                </>
+              )}
+              {(layer as any).mask?.type === "image" && (
+                <>
+                  <label className="text-xs col-span-2">
+                    Mask image URL
+                    <input
+                      type="text"
+                      value={(layer as any).mask?.src || ""}
+                      onChange={(e) => updateLayer(layer.id, { mask: { type: "image", src: e.target.value } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Pick file
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const url = URL.createObjectURL(f);
+                        updateLayer(layer.id, { mask: { type: "image", src: url } } as any);
+                      }}
+                    />
+                  </label>
+                  <div className="text-[11px] text-gray-400 col-span-3">
+                    Image mask alpha will be used to cut the layer. It maps to the layer’s quad (no scaling controls yet).
+                  </div>
                 </>
               )}
             </div>

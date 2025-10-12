@@ -40,6 +40,10 @@ function applyCommon(ctx: CanvasRenderingContext2D, layer: any, x: number, y: nu
 
 function applyMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
   if (!mask) return;
+  if (mask.type === "image") {
+    // handled separately via destination-in compositing after drawing
+    return;
+  }
   ctx.save();
   ctx.beginPath();
   if (mask.type === "rect") {
@@ -53,7 +57,20 @@ function applyMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
 
 function endMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
   if (!mask) return;
+  if (mask.type === "image") return;
   ctx.restore();
+}
+
+// Image mask via destination-in compositing
+function applyImageMask(ctx: CanvasRenderingContext2D, mask: Mask | undefined, x: number, y: number, w: number, h: number) {
+  if (!mask || mask.type !== "image" || !mask.src) return;
+  const img = new Image();
+  img.src = mask.src;
+  if (!img.complete) return;
+  const prev = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(img, x, y, w, h);
+  ctx.globalCompositeOperation = prev;
 }
 
 function drawText(
@@ -80,6 +97,10 @@ function drawText(
   }
   ctx.fillText(layer.text, x, y);
   endMask(ctx, layer.mask);
+  // apply image mask after drawing if requested
+  const w = Math.ceil(ctx.measureText(layer.text).width);
+  const h = Math.ceil(size * 1.3);
+  applyImageMask(ctx, layer.mask, x, y - size * 0.05, w, h);
   ctx.restore();
 }
 

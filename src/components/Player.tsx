@@ -24,6 +24,8 @@ const Player: React.FC = () => {
   const setCompressorOn = usePlayerStore((s) => s.setCompressorOn);
   const limiterOn = usePlayerStore((s) => s.limiterOn);
   const setLimiterOn = usePlayerStore((s) => s.setLimiterOn);
+  const compressorPreset = usePlayerStore((s) => s.compressorPreset);
+  const setCompressorPreset = usePlayerStore((s) => s.setCompressorPreset);
   const reverbOn = usePlayerStore((s) => s.reverbOn);
   const setReverbOn = usePlayerStore((s) => s.setReverbOn);
   const reverbWet = usePlayerStore((s) => s.reverbWet);
@@ -49,6 +51,7 @@ const Player: React.FC = () => {
     audioEngine.setPlaybackRate(playbackRate);
     audioEngine.setPan(pan);
     audioEngine.setCompressor(compressorOn);
+    audioEngine.setCompressorPreset(compressorPreset);
     audioEngine.setLimiter(limiterOn);
     audioEngine.setReverb(reverbOn);
     audioEngine.setReverbWet(reverbWet);
@@ -148,6 +151,10 @@ const Player: React.FC = () => {
   useEffect(() => {
     audioEngine.setCompressor(compressorOn);
   }, [compressorOn]);
+
+  useEffect(() => {
+    audioEngine.setCompressorPreset(compressorPreset);
+  }, [compressorPreset]);
 
   useEffect(() => {
     audioEngine.setLimiter(limiterOn);
@@ -361,6 +368,16 @@ const Player: React.FC = () => {
           />
           Compressor
         </label>
+        <select
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+          value={compressorPreset}
+          onChange={(e) => setCompressorPreset(e.target.value as any)}
+          title="Compressor preset"
+        >
+          <option value="light">light</option>
+          <option value="medium">medium</option>
+          <option value="strong">strong</option>
+        </select>
 
         <label className="flex items-center gap-1 text-xs text-gray-300">
           <input
