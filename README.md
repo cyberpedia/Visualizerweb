@@ -39,9 +39,10 @@ Visualizers and overlays
 - Glow/bloom effect on GPU path with adjustable intensity
 - Overlays: album art, title, and artist text (blend modes: source-over, lighter/add, multiply, screen)
 - Advanced template layers: text, image, shape, progress ring, particles
-- Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle/image) on Canvas/Offline paths; WebGL path supports additive and shader-based multiply/screen for overlays and layers with rect/circle/image masks
+- Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle/image/polygon) on Canvas/Offline paths; WebGL path supports additive and shader-based multiply/screen for overlays and layers with rect/circle/image masks (polygon masks for text/image via rasterized mask textures)
 - Keyframe timeline for animatable properties (x, y, opacity, size, rotation)
 - Template Gallery with defaults, user presets; template import/export (JSON)
+- Editor grid overlay with configurable grid size (for alignment)
 
 Beat detection and info
 - Adaptive spectral flux beat detection and reactive visuals

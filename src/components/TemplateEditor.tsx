@@ -213,6 +213,29 @@ const TemplateEditor: React.FC = () => {
         </div>
       </div>
 
+      <div className="mb-3 grid grid-cols-3 gap-3">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={template.showGrid ?? false}
+            onChange={(e) => set({ showGrid: e.target.checked })}
+          />
+          <span className="text-xs text-gray-300">Show editor grid</span>
+        </label>
+        <div>
+          <div className="text-xs text-gray-300 mb-1">Grid size</div>
+          <input
+            type="range"
+            min={8}
+            max={128}
+            step={4}
+            value={template.gridSize ?? 32}
+            onChange={(e) => set({ gridSize: Number(e.target.value) })}
+            className="w-full accent-brand-500"
+          />
+        </div>
+      </div>
+
       <div className="mb-3">
         <div className="text-xs text-gray-300 mb-1">Background video</div>
         <div className="grid grid-cols-3 gap-2">

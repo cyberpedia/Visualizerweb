@@ -254,6 +254,11 @@ function applyMask(ctx: OffscreenCanvasRenderingContext2D, mask?: any) {
     ctx.rect(mask.x, mask.y, mask.width, mask.height);
   } else if (mask.type === "circle") {
     ctx.arc(mask.x, mask.y, mask.radius, 0, Math.PI * 2);
+  } else if (mask.type === "polygon" && Array.isArray(mask.points) && mask.points.length) {
+    ctx.moveTo(mask.points[0].x, mask.points[0].y);
+    for (let i = 1; i < mask.points.length; i++) {
+      ctx.lineTo(mask.points[i].x, mask.points[i].y);
+    }
   }
   ctx.closePath();
   ctx.clip();

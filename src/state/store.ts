@@ -43,7 +43,8 @@ export type KeyframeNumber = { time: number; value: number; easing?: Easing };
 export type Mask =
   | { type: "rect"; x: number; y: number; width: number; height: number }
   | { type: "circle"; x: number; y: number; radius: number }
-  | { type: "image"; src: string };
+  | { type: "image"; src: string }
+  | { type: "polygon"; points: Array<{ x: number; y: number }>; feather?: number };
 
 export type BaseLayer = {
   id: string;
@@ -144,6 +145,9 @@ export type TemplateConfig = {
   titleOverlay?: TitleOverlay;
   artistOverlay?: ArtistOverlay;
   layers?: Layer[];
+  // editor grid overlay
+  showGrid?: boolean;
+  gridSize?: number;
 };
 
 export type ExportSettings = {
@@ -274,7 +278,9 @@ const DEFAULT_TEMPLATE: TemplateConfig = {
     align: "left",
     blendMode: "source-over"
   },
-  layers: []
+  layers: [],
+  showGrid: false,
+  gridSize: 32
 };
 
 const DEFAULT_EXPORT: ExportSettings = {

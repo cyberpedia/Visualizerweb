@@ -179,6 +179,27 @@ const VisualizerCanvas: React.FC = () => {
       const duration = audioEngine.getDuration() || currentTrack?.duration || 0;
       drawLayers(ctx, drawW, drawH, template, nowSec, duration, pulse);
 
+      // Editor grid overlay
+      if (template.showGrid) {
+        const size = Math.max(8, template.gridSize ?? 32);
+        ctx.save();
+        ctx.strokeStyle = "#ffffff0f";
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= drawW; x += size) {
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, 0);
+          ctx.lineTo(x + 0.5, drawH);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= drawH; y += size) {
+          ctx.beginPath();
+          ctx.moveTo(0, y + 0.5);
+          ctx.lineTo(drawW, y + 0.5);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);

@@ -240,6 +240,7 @@ const LayerEditor: React.FC = () => {
                     else if (val === "rect") updateLayer(layer.id, { mask: { type: "rect", x: layer.x, y: layer.y, width: 100, height: 50 } } as any);
                     else if (val === "circle") updateLayer(layer.id, { mask: { type: "circle", x: layer.x, y: layer.y, radius: 40 } } as any);
                     else if (val === "image") updateLayer(layer.id, { mask: { type: "image", src: "" } } as any);
+                    else if (val === "polygon") updateLayer(layer.id, { mask: { type: "polygon", points: [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 80 }, { x: 0, y: 80 }] } } as any);
                   }}
                   className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                 >
@@ -247,6 +248,7 @@ const LayerEditor: React.FC = () => {
                   <option value="rect">rect</option>
                   <option value="circle">circle</option>
                   <option value="image">image</option>
+                  <option value="polygon">polygon</option>
                 </select>
               </label>
               {(layer as any).mask?.type === "rect" && (
@@ -318,6 +320,40 @@ const LayerEditor: React.FC = () => {
                       className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                     />
                   </label>
+                </>
+              )}
+              {(layer as any).mask?.type === "polygon" && (
+                <>
+                  <label className="text-xs col-span-2">
+                    Points (x,y pairs separated by spaces)
+                    <input
+                      type="text"
+                      value={((layer as any).mask?.points || []).map((p: any) => `${p.x},${p.y}`).join(" ") || ""}
+                      onChange={(e) => {
+                        const parts = e.target.value.trim().split(/\s+/).filter(Boolean);
+                        const pts = parts.map((s) => {
+                          const [xs, ys] = s.split(",");
+                          const x = Number(xs); const y = Number(ys);
+                          return { x: isFinite(x) ? x : 0, y: isFinite(y) ? y : 0 };
+                        });
+                        updateLayer(layer.id, { mask: { ...(layer as any).mask, points: pts } } as any);
+                      }}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                      placeholder="0,0 120,0 120,80 0,80"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    Feather
+                    <input
+                      type="number"
+                      value={(layer as any).mask?.feather || 0}
+                      onChange={(e) => updateLayer(layer.id, { mask: { ...(layer as any).mask, feather: Number(e.target.value) } } as any)}
+                      className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <div className="text-[11px] text-gray-400 col-span-3">
+                    Polygon mask clips the layer using the polygon path. Feather adds a soft edge (Canvas2D/Offline). WebGL uses a rasterized mask texture.
+                  </div>
                 </>
               )}
               {(layer as any).mask?.type === "image" && (

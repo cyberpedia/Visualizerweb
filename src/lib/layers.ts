@@ -50,6 +50,12 @@ function applyMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
     ctx.rect(mask.x, mask.y, mask.width, mask.height);
   } else if (mask.type === "circle") {
     ctx.arc(mask.x, mask.y, mask.radius, 0, Math.PI * 2);
+  } else if ((mask as any).type === "polygon" && Array.isArray((mask as any).points) && (mask as any).points.length) {
+    const pts = (mask as any).points as Array<{ x: number; y: number }>;
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
   }
   ctx.closePath();
   ctx.clip();

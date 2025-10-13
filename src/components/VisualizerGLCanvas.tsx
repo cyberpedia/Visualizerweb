@@ -647,6 +647,42 @@ void main(){
       return info;
     };
 
+    // Polygon mask texture cache and generator
+    const polygonMaskCache = new Map<string, { tex: WebGLTexture; w: number; h: number }>();
+    const makePolygonMaskTexture = (w: number, h: number, points: Array<{ x: number; y: number }>) => {
+      const key = `poly|${w}x${h}|${points.map(p => `${p.x},${p.y}`).join(";")}`;
+      const cached = polygonMaskCache.get(key);
+      if (cached) return cached;
+      const off = document.createElement("canvas");
+      off.width = Math.max(2, Math.floor(w));
+      off.height = Math.max(2, Math.floor(h));
+      const ctx2 = off.getContext("2d")!;
+      ctx2.clearRect(0, 0, off.width, off.height);
+      ctx2.fillStyle = "rgba(255,255,255,1)";
+      ctx2.beginPath();
+      if (points.length) {
+        ctx2.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx2.lineTo(points[i].x, points[i].y);
+        }
+      }
+      ctx2.closePath();
+      ctx2.fill();
+
+      const img = ctx2.getImageData(0, 0, off.width, off.height);
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, off.width, off.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, img.data);
+      const info = { tex, w: off.width, h: off.height };
+      polygonMaskCache.set(key, info);
+      return info;
+    };
+
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -1130,7 +1166,7 @@ void main(){
             gl.uniform2f(uCenterSDFLoc, cx, cy);
             gl.uniform1f(uRadiusSDFLoc, rad);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
-          } else if (isImageMask && layer.mask.src) {
+          } else if (isImageMask && layer.mask.type === "image" && layer.mask.src) {
             const mInfo = imageCache.get(layer.mask.src) || null;
             if (!mInfo) {
               void makeTextureFromImage(layer.mask.src);
@@ -1152,6 +1188,24 @@ void main(){
               gl.uniform1f(uAlphaSDFImgLoc, opacity);
               gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
             }
+          } else if (isImageMask && layer.mask.type === "polygon" && Array.isArray(layer.mask.points)) {
+            const maskTexInfo = makePolygonMaskTexture(t.w, t.h, layer.mask.points);
+            gl.useProgram(progSDFImgMask);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+            gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(aPosSDFImgMaskLoc);
+            gl.vertexAttribPointer(aPosSDFImgMaskLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTexSDFImgMaskLoc);
+            gl.vertexAttribPointer(aTexSDFImgMaskLoc, 2, gl.FLOAT, false, 16, 8);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, t.tex);
+            gl.uniform1i(uSamplerSDFImgMaskLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, maskTexInfo.tex);
+            gl.uniform1i(uSamplerMaskSDFImgLoc, 1);
+            gl.uniform3f(uTextColorSDFImgLoc, col[0], col[1], col[2]);
+            gl.uniform1f(uAlphaSDFImgLoc, opacity);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
           } else {
             gl.useProgram(progSDF);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
@@ -1243,7 +1297,7 @@ void main(){
             gl.uniform2f(uCenterTexLoc, cx, cy);
             gl.uniform1f(uRadiusTexLoc, rad);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
-          } else if (isImageMask && layer.mask.src) {
+          } else if (isImageMask && layer.mask.type === "image" && layer.mask.src) {
             const mInfo = imageCache.get(layer.mask.src) || null;
             if (!mInfo) {
               void makeTextureFromImage(layer.mask.src);
@@ -1264,6 +1318,23 @@ void main(){
               gl.uniform1f(uAlphaTexImgMaskLoc, opacity);
               gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
             }
+          } else if (isImageMask && layer.mask.type === "polygon" && Array.isArray(layer.mask.points)) {
+            const maskTexInfo = makePolygonMaskTexture(w, h, layer.mask.points);
+            gl.useProgram(progTexImgMask);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
+            gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(aPosTexImgMaskLoc);
+            gl.vertexAttribPointer(aPosTexImgMaskLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTexTexImgMaskLoc);
+            gl.vertexAttribPointer(aTexTexImgMaskLoc, 2, gl.FLOAT, false, 16, 8);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texInfo.tex);
+            gl.uniform1i(uSamplerTexImgLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, maskTexInfo.tex);
+            gl.uniform1i(uSamplerMaskImgLoc, 1);
+            gl.uniform1f(uAlphaTexImgMaskLoc, opacity);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
           } else {
             gl.useProgram(progTex);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
@@ -1550,6 +1621,35 @@ void main(){
       const bloomIntensity = Math.min(1.5, (template.glowStrength ?? 0) / 12);
       gl.uniform1f(uIntensityLoc, bloomIntensity);
       gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+      // Grid overlay (editor aid)
+      if (template.showGrid) {
+        const size = Math.max(8, template.gridSize ?? 32);
+        // vertical lines
+        const vLines = [];
+        for (let x = 0; x <= canvas.width; x += size) {
+          const nx = (x / canvas.width) * 2 - 1;
+          vLines.push(nx, -1, nx, 1);
+        }
+        // horizontal lines
+        const hLines = [];
+        for (let y = 0; y <= canvas.height; y += size) {
+          const ny = (y / canvas.height) * -2 + 1;
+          hLines.push(-1, ny, 1, ny);
+        }
+        const verts = new Float32Array(vLines.length + hLines.length);
+        verts.set(vLines, 0);
+        verts.set(hLines, vLines.length);
+        gl.useProgram(progColor);
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufQuads);
+        gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        const aPosLoc2 = gl.getAttribLocation(progColor, "aPos");
+        gl.enableVertexAttribArray(aPosLoc2);
+        gl.vertexAttribPointer(aPosLoc2, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform3f(uColorLoc, 1, 1, 1);
+        gl.uniform1f(uAlphaColorLoc, 0.08);
+        gl.drawArrays(gl.LINES, 0, verts.length / 2);
+      }
 
       raf = requestAnimationFrame(draw);
     };
