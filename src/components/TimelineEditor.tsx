@@ -22,6 +22,7 @@ const TimelineEditor: React.FC = () => {
   const [prop, setProp] = useState<PropKey>("x");
   const [zoom, setZoom] = useState<number>(1);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [draggingProp, setDraggingProp] = useState<PropKey | null>(null);
 
   const layers = useMemo(() => (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex), [template.layers]);
   const selected = layers.find((l) => l.id === layerId) as any;
@@ -42,15 +43,15 @@ const TimelineEditor: React.FC = () => {
     updateLayer(selected.id, { kf: nextKf });
   };
 
-  const updateKeyframe = (idx: number, patch: Partial<{ time: number; value: number; easing: string }>) => {
+  const updateKeyframeFor = (propKey: PropKey, idx: number, patch: Partial<{ time: number; value: number; easing: string }>) => {
     if (!selected) return;
-    const nextKf = { ...(selected.kf || {}) };
-    const list = Array.isArray(nextKf[prop]) ? nextKf[prop].slice() : [];
+    const nextKf = { ...(selected.kf || {}) } as any;
+    const list = Array.isArray(nextKf[propKey]) ? nextKf[propKey].slice() : [];
     const cur = list[idx];
     if (!cur) return;
     const next = { ...cur, ...patch };
     list[idx] = next;
-    nextKf[prop] = list;
+    nextKf[propKey] = list;
     updateLayer(selected.id, { kf: nextKf });
   };
 
@@ -167,68 +168,78 @@ const TimelineEditor: React.FC = () => {
         </label>
       </div>
 
-      {/* Timeline track */}
+      {/* Multi-lane timeline tracks */}
       {selected && (
-        <div className="relative w-full h-16 bg-gray-900 border border-gray-800 rounded mb-3"
-          onClick={(e) => {
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const w = rect.width;
-            const dur = isFinite(duration) && duration > 0 ? duration : 60;
-            const t = snapTime((x / w) * dur / zoom);
-            const curVal = (selected as any)[prop] ?? 0;
-            const kf = { time: t, value: curVal, easing: "linear" as const };
-            const nextKf = { ...(selected.kf || {}) };
-            const list = Array.isArray(nextKf[prop]) ? nextKf[prop].slice() : [];
-            list.push(kf);
-            nextKf[prop] = list;
-            updateLayer(selected.id, { kf: nextKf });
-          }}
-          onMouseMove={(e) => {
-            if (draggingIdx == null) return;
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const w = rect.width;
-            const dur = isFinite(duration) && duration > 0 ? duration : 60;
-            const t = snapTime(Math.max(0, Math.min(dur, (x / w) * dur / zoom)));
-            updateKeyframe(draggingIdx, { time: t });
-          }}
-          onMouseUp={() => setDraggingIdx(null)}
-          onMouseLeave={() => setDraggingIdx(null)}
-          title="Click to add keyframe at position"
-        >
-          {/* grid lines */}
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i}
-              className="absolute top-0 bottom-0 border-r border-gray-800"
-              style={{ left: `${(i / 10) * 100}%` }}
-            />
-          ))}
-          {/* markers */}
-          {markers.map((m, i) => (
-            <div key={i}
-              className="absolute top-0 bottom-0 border-l border-gray-600"
-              style={{
-                left: `${(Math.min(1, m / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`
-              }}
-              title={`${m.toFixed(2)}s`}
-            />
-          ))}
-          {/* keyframes for selected prop */}
-          {Array.isArray(selected.kf?.[prop]) && (selected.kf![prop] as any[])
-            .slice()
-            .sort((a: any, b: any) => a.time - b.time)
-            .map((k: any, i: number) => (
-              <div key={i}
-                className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-ew-resize"
-                style={{
-                  left: `${(Math.min(1, k.time / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`,
-                  top: "50%"
-                }}
-                title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
-                onMouseDown={() => setDraggingIdx(i)}
-              />
-            ))}
+        <div className="space-y-2 mb-3">
+          {props.map((laneProp) => {
+            const kfs = (selected.kf?.[laneProp] as any[]) || [];
+            const sortedKfs = kfs.slice().sort((a, b) => a.time - b.time);
+            return (
+              <div key={laneProp} className="relative w-full h-14 bg-gray-900 border border-gray-800 rounded">
+                <div className="absolute left-2 top-1 text-[11px] text-gray-400">{laneProp}</div>
+                <div
+                  className="absolute inset-0"
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const w = rect.width;
+                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                    const t = snapTime((x / w) * dur / zoom);
+                    const curVal = (selected as any)[laneProp] ?? 0;
+                    const kf = { time: t, value: curVal, easing: "linear" as const };
+                    const nextKf = { ...(selected.kf || {}) } as any;
+                    const list = Array.isArray(nextKf[laneProp]) ? nextKf[laneProp].slice() : [];
+                    list.push(kf);
+                    nextKf[laneProp] = list;
+                    updateLayer(selected.id, { kf: nextKf });
+                  }}
+                  onMouseMove={(e) => {
+                    if (draggingIdx == null || draggingProp == null) return;
+                    if (draggingProp !== laneProp) return;
+                    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const w = rect.width;
+                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                    const t = snapTime(Math.max(0, Math.min(dur, (x / w) * dur / zoom)));
+                    updateKeyframeFor(laneProp, draggingIdx, { time: t });
+                  }}
+                  onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); }}
+                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); }}
+                  title={`Click to add keyframe on ${laneProp}`}
+                >
+                  {/* grid lines */}
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i}
+                      className="absolute top-0 bottom-0 border-r border-gray-800"
+                      style={{ left: `${(i / 10) * 100}%` }}
+                    />
+                  ))}
+                  {/* markers */}
+                  {markers.map((m, i) => (
+                    <div key={i}
+                      className="absolute top-0 bottom-0 border-l border-gray-600"
+                      style={{
+                        left: `${(Math.min(1, m / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`
+                      }}
+                      title={`${m.toFixed(2)}s`}
+                    />
+                  ))}
+                  {/* keyframes for laneProp */}
+                  {sortedKfs.map((k: any, i: number) => (
+                    <div key={i}
+                      className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-ew-resize"
+                      style={{
+                        left: `${(Math.min(1, k.time / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`,
+                        top: "50%"
+                      }}
+                      title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
+                      onMouseDown={() => { setDraggingIdx(i); setDraggingProp(laneProp); }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -250,7 +261,7 @@ const TimelineEditor: React.FC = () => {
                       min={0}
                       step={0.01}
                       value={k.time}
-                      onChange={(e) => updateKeyframe(i, { time: Number(e.target.value) })}
+                      onChange={(e) => updateKeyframeFor(prop, i, { time: Number(e.target.value) })}
                       className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                     />
                   </label>
@@ -260,7 +271,7 @@ const TimelineEditor: React.FC = () => {
                       type="number"
                       step={prop === "opacity" ? 0.05 : 1}
                       value={k.value}
-                      onChange={(e) => updateKeyframe(i, { value: Number(e.target.value) })}
+                      onChange={(e) => updateKeyframeFor(prop, i, { value: Number(e.target.value) })}
                       className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                     />
                   </label>
@@ -268,7 +279,7 @@ const TimelineEditor: React.FC = () => {
                     Easing
                     <select
                       value={k.easing || "linear"}
-                      onChange={(e) => updateKeyframe(i, { easing: e.target.value })}
+                      onChange={(e) => updateKeyframeFor(prop, i, { easing: e.target.value })}
                       className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                     >
                       <option value="linear">linear</option>
@@ -288,7 +299,7 @@ const TimelineEditor: React.FC = () => {
                           min={0}
                           max={1}
                           value={k.bezier?.x1 ?? 0.25}
-                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: Number(e.target.value), y1: k.bezier?.y1 ?? 0.1, x2: k.bezier?.x2 ?? 0.25, y2: k.bezier?.y2 ?? 1 } } as any)}
+                          onChange={(e) => updateKeyframeFor(prop, i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: Number(e.target.value), y1: k.bezier?.y1 ?? 0.1, x2: k.bezier?.x2 ?? 0.25, y2: k.bezier?.y2 ?? 1 } } as any)}
                           className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                         />
                       </label>
@@ -300,7 +311,7 @@ const TimelineEditor: React.FC = () => {
                           min={0}
                           max={1}
                           value={k.bezier?.y1 ?? 0.1}
-                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: Number(e.target.value), x2: k.bezier?.x2 ?? 0.25, y2: k.bezier?.y2 ?? 1 } } as any)}
+                          onChange={(e) => updateKeyframeFor(prop, i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: Number(e.target.value), x2: k.bezier?.x2 ?? 0.25, y2: k.bezier?.y2 ?? 1 } } as any)}
                           className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                         />
                       </label>
@@ -312,7 +323,7 @@ const TimelineEditor: React.FC = () => {
                           min={0}
                           max={1}
                           value={k.bezier?.x2 ?? 0.25}
-                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: k.bezier?.y1 ?? 0.1, x2: Number(e.target.value), y2: k.bezier?.y2 ?? 1 } } as any)}
+                          onChange={(e) => updateKeyframeFor(prop, i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: k.bezier?.y1 ?? 0.1, x2: Number(e.target.value), y2: k.bezier?.y2 ?? 1 } } as any)}
                           className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                         />
                       </label>
@@ -324,7 +335,7 @@ const TimelineEditor: React.FC = () => {
                           min={0}
                           max={1}
                           value={k.bezier?.y2 ?? 1}
-                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: k.bezier?.y1 ?? 0.1, x2: k.bezier?.x2 ?? 0.25, y2: Number(e.target.value) } } as any)}
+                          onChange={(e) => updateKeyframeFor(prop, i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: k.bezier?.y1 ?? 0.1, x2: k.bezier?.x2 ?? 0.25, y2: Number(e.target.value) } } as any)}
                           className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                         />
                       </label>

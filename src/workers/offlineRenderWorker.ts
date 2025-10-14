@@ -202,6 +202,7 @@ function cubicBezierY(t: number, x1: number, y1: number, x2: number, y2: number)
   const u = 1 - t;
   return (3 * u * u * t * y1) + (3 * u * t * t * y2) + (t * t * t);
 }
+
 function interpKF(kf: any[] | undefined, t: number, base: number): number {
   if (!kf || kf.length === 0) return base;
   const sorted = kf.slice().sort((a: any, b: any) => a.time - b.time);
@@ -249,10 +250,11 @@ function reactiveVal(base: number, layer: any, prop: "x" | "y" | "opacity" | "si
 }
 
 function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: number, y: number) {
-  ctx.globalCompositeOperation = (layer.blendMode as any) || "source-over";
-  (ctx as any).shadowBlur = layer.shadowBlur || 0;
-  (ctx as any).shadowColor = layer.shadowColor || "transparent";
-  // Canvas2D filters (offscreen)
+  ctx.globalCompositeOperation = layer.blendMode || "source-over";
+  ctx.shadowBlur = layer.shadowBlur || 0;
+  ctx.shadowColor = layer.shadowColor || "transparent";
+
+  // filters
   const f = layer.filters || {};
   const parts: string[] = [];
   if (typeof f.blur === "number" && f.blur > 0) parts.push(`blur(${f.blur}px)`);
@@ -262,7 +264,7 @@ function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: numb
   if (typeof f.contrast === "number" && f.contrast > 0 && f.contrast !== 1) parts.push(`contrast(${f.contrast})`);
   (ctx as any).filter = parts.length ? parts.join(" ") : "none";
 
-  const rot = (layer.rotation || 0) * Math.PI / 180;
+  const rot = (((layer as any)._curRotation ?? layer.rotation) || 0) * Math.PI / 180;
   const sx = layer.scaleX ?? 1;
   const sy = layer.scaleY ?? 1;
   const ax = layer.anchorX ?? 0;
@@ -363,7 +365,7 @@ async function drawWorkerLayers(
     ctx.save();
     ctx.globalAlpha = go;
     applyCommon(ctx, g, gx, gy);
-    applyMask(ctx, g.mask);
+    applyMask(ctx, g.mask, g.maskTransform);
 
     const children = sorted.filter((l: any) => l.parentId === g.id).slice().sort((a, b) => a.zIndex - b.zIndex);
     for (const l of children as any[]) {
@@ -567,7 +569,7 @@ async function drawWorkerLayers(
         const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, lp, time);
         ctx.globalAlpha = lp.opacity;
         applyCommon(ctx, lp, 0, 0);
-        applyMask(ctx, lp.mask);
+        applyMask(ctx, lp.mask, lp.maskTransform);
         ctx.fillStyle = lp.color;
         const count = lp.count;
         const speed = lp.speed * (1 + 0.5 * (beatPulse || 0));
