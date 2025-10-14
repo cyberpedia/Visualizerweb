@@ -48,8 +48,9 @@ export type Mask =
 
 export type BaseLayer = {
   id: string;
-  type: "text" | "image" | "shape" | "progressRing" | "particles";
+  type: "text" | "image" | "shape" | "progressRing" | "particles" | "group";
   visible: boolean;
+  locked?: boolean;
   zIndex: number;
   x: number;
   y: number;
@@ -59,10 +60,17 @@ export type BaseLayer = {
   scaleY?: number;
   anchorX?: number; // pivot X
   anchorY?: number; // pivot Y
+  parentId?: string | null; // optional parent group
   blendMode?: GlobalCompositeOperation;
   shadowColor?: string;
   shadowBlur?: number;
   mask?: Mask; // optional per-layer mask
+  reactive?: {
+    target: "x" | "y" | "opacity" | "size";
+    source: "beat";
+    amount: number;
+    smooth?: number;
+  };
   kf?: {
     x?: KeyframeNumber[];
     y?: KeyframeNumber[];
@@ -118,7 +126,11 @@ export type ParticlesLayer = BaseLayer & {
   color: string;
 };
 
-export type Layer = TextLayer | ImageLayer | ShapeLayer | ProgressRingLayer | ParticlesLayer;
+export type GroupLayer = BaseLayer & {
+  type: "group";
+};
+
+export type Layer = TextLayer | ImageLayer | ShapeLayer | ProgressRingLayer | ParticlesLayer | GroupLayer;
 
 export type TemplateConfig = {
   type: VisualizerType;
@@ -207,6 +219,11 @@ type PlayerState = {
   exportSettings: ExportSettings;
   exportPresets: ExportPreset[];
 
+  // timeline
+  timelineMarkers: number[];
+  timelineSnapEnabled: boolean;
+  timelineSnapStep: number; // seconds
+
   // actions
   addTracks: (tracks: Track[]) => void;
   addUrlTrack: (url: string) => void;
@@ -228,8 +245,12 @@ type PlayerState = {
   setAnalyzer: (an: AnalyserNode | null) => void;
   setTemplate: (t: Partial<TemplateConfig>) => void;
   addLayer: (layer: Layer) => void;
+  addGroupLayer: (group?: Partial<GroupLayer>) => void;
   updateLayer: (id: string, patch: Partial<Layer>) => void;
   removeLayer: (id: string) => void;
+  setLayerParent: (id: string, parentId: string | null) => void;
+  setLayerLocked: (id: string, locked: boolean) => void;
+  moveLayerZIndex: (id: string, zIndex: number) => void;
   setCanvasEl: (el: HTMLCanvasElement | null) => void;
   setExportActive: (v: boolean) => void;
   setExportSettings: (s: Partial<ExportSettings>) => void;
@@ -243,6 +264,13 @@ type PlayerState = {
   setRepeat: (mode: "off" | "one" | "all") => void;
   next: () => void;
   prev: () => void;
+
+  // timeline actions
+  addMarker: (t: number) => void;
+  removeMarker: (t: number) => void;
+  clearMarkers: () => void;
+  setTimelineSnapEnabled: (on: boolean) => void;
+  setTimelineSnapStep: (s: number) => void;
 };
 
 const DEFAULT_TEMPLATE: TemplateConfig = {
@@ -329,6 +357,10 @@ export const usePlayerStore = create<PlayerState>()(
       exportSettings: DEFAULT_EXPORT,
       exportPresets: [],
 
+      timelineMarkers: [],
+      timelineSnapEnabled: true,
+      timelineSnapStep: 0.1,
+
       addTracks: (tracks) =>
         set((s) => ({
           playlist: [...s.playlist, ...tracks],
@@ -407,6 +439,35 @@ export const usePlayerStore = create<PlayerState>()(
             layers: [...(s.visualizerTemplate.layers ?? []), layer]
           }
         })),
+      addGroupLayer: (group) =>
+        set((s) => {
+          const gId = crypto.randomUUID();
+          const g: GroupLayer = {
+            id: gId,
+            type: "group",
+            visible: true,
+            locked: false,
+            zIndex: 50,
+            x: 0,
+            y: 0,
+            opacity: 1,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+            anchorX: 0,
+            anchorY: 0,
+            blendMode: "source-over",
+            mask: undefined,
+            parentId: null,
+            ...group
+          } as GroupLayer;
+          return {
+            visualizerTemplate: {
+              ...s.visualizerTemplate,
+              layers: [...(s.visualizerTemplate.layers ?? []), g]
+            }
+          };
+        }),
       updateLayer: (id, patch) =>
         set((s) => ({
           visualizerTemplate: {
@@ -421,6 +482,33 @@ export const usePlayerStore = create<PlayerState>()(
           visualizerTemplate: {
             ...s.visualizerTemplate,
             layers: (s.visualizerTemplate.layers ?? []).filter((l) => l.id !== id)
+          }
+        })),
+      setLayerParent: (id, parentId) =>
+        set((s) => ({
+          visualizerTemplate: {
+            ...s.visualizerTemplate,
+            layers: (s.visualizerTemplate.layers ?? []).map((l) =>
+              l.id === id ? { ...l, parentId: parentId || null } : l
+            )
+          }
+        })),
+      setLayerLocked: (id, locked) =>
+        set((s) => ({
+          visualizerTemplate: {
+            ...s.visualizerTemplate,
+            layers: (s.visualizerTemplate.layers ?? []).map((l) =>
+              l.id === id ? { ...l, locked: !!locked } : l
+            )
+          }
+        })),
+      moveLayerZIndex: (id, zIndex) =>
+        set((s) => ({
+          visualizerTemplate: {
+            ...s.visualizerTemplate,
+            layers: (s.visualizerTemplate.layers ?? []).map((l) =>
+              l.id === id ? { ...l, zIndex } : l
+            )
           }
         })),
       setCanvasEl: (el) => set(() => ({ canvasEl: el })),
@@ -490,7 +578,21 @@ export const usePlayerStore = create<PlayerState>()(
           const prevIdx = (currentIndex - 1 + playlist.length) % playlist.length;
           set(() => ({ currentIndex: prevIdx }));
         }
-      }
+      },
+
+      // timeline
+      addMarker: (t) =>
+        set((s) => ({
+          timelineMarkers: [...s.timelineMarkers, Math.max(0, t)]
+        })),
+      removeMarker: (t) =>
+        set((s) => ({
+          timelineMarkers: s.timelineMarkers.filter((m) => Math.abs(m - t) > 1e-3)
+        })),
+      clearMarkers: () =>
+        set(() => ({ timelineMarkers: [] })),
+      setTimelineSnapEnabled: (on) => set(() => ({ timelineSnapEnabled: !!on })),
+      setTimelineSnapStep: (step) => set(() => ({ timelineSnapStep: Math.max(0.01, step) }))
     }),
     {
       name: "avee-web",
@@ -517,7 +619,10 @@ export const usePlayerStore = create<PlayerState>()(
         exportSettings: s.exportSettings,
         exportPresets: s.exportPresets,
         shuffle: s.shuffle,
-        repeat: s.repeat
+        repeat: s.repeat,
+        timelineMarkers: s.timelineMarkers,
+        timelineSnapEnabled: s.timelineSnapEnabled,
+        timelineSnapStep: s.timelineSnapStep
       })
     }
   )

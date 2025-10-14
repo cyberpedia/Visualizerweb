@@ -231,6 +231,16 @@ function lerpColor(a: string, b: string, t: number) {
   return `rgb(${r}, ${g}, ${bl})`;
 }
 
+function reactiveVal(base: number, layer: any, prop: "x" | "y" | "opacity" | "size", beatPulse: number): number {
+  const r = layer.reactive;
+  if (!r || r.target !== prop) return base;
+  const amt = r.amount ?? 0;
+  const sm = Math.max(0, Math.min(1, r.smooth ?? 0));
+  const p = beatPulse;
+  const eff = p * (1 - sm) + (p * p) * sm * 0.5;
+  return base + amt * eff;
+}
+
 function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: number, y: number) {
   ctx.globalCompositeOperation = (layer.blendMode as any) || "source-over";
   (ctx as any).shadowBlur = layer.shadowBlur || 0;
@@ -269,6 +279,38 @@ function endMask(ctx: OffscreenCanvasRenderingContext2D, mask?: any) {
   ctx.restore();
 }
 
+function getParentChain(template: TemplateConfig, layer: any): any[] {
+  const chain: any[] = [];
+  const all = (template.layers ?? []) as any[];
+  let pId = layer.parentId || null;
+  const visited = new Set<string>();
+  while (pId) {
+    const p = all.find((l) => l.id === pId && l.type === "group");
+    if (!p || visited.has(p.id)) break;
+    chain.unshift(p);
+    visited.add(p.id);
+    pId = p.parentId || null;
+  }
+  return chain;
+}
+
+function beginGroupHierarchy(ctx: OffscreenCanvasRenderingContext2D, template: TemplateConfig, layer: any, time: number) {
+  const chain = getParentChain(template, layer);
+  for (const g of chain) {
+    const gx = interpKF(g.kf?.x, time, g.x);
+    const gy = interpKF(g.kf?.y, time, g.y);
+    applyCommon(ctx, g, gx, gy);
+    applyMask(ctx, g.mask);
+  }
+  return chain;
+}
+
+function endGroupHierarchy(ctx: OffscreenCanvasRenderingContext2D, chain: any[]) {
+  for (let i = chain.length - 1; i >= 0; i--) {
+    endMask(ctx, chain[i].mask);
+  }
+}
+
 async function drawWorkerLayers(
   ctx: OffscreenCanvasRenderingContext2D,
   width: number,
@@ -280,17 +322,41 @@ async function drawWorkerLayers(
   layerBitmaps: Map<string, ImageBitmap>,
   maskCache: Map<string, ImageBitmap>
 ) {
-  const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
-  for (const layer of layers as any[]) {
-    if (!layer.visible) continue;
-    switch (layer.type) {
+  const sorted = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
+
+  const renderGroup = async (g: any) => {
+    const gx = reactiveVal(interpKF(g.kf?.x, time, g.x), g, "x", beatPulse);
+    const gy = reactiveVal(interpKF(g.kf?.y, time, g.y), g, "y", beatPulse);
+    const go = reactiveVal(interpKF(g.kf?.opacity, time, g.opacity), g, "opacity", beatPulse);
+
+    ctx.save();
+    ctx.globalAlpha = go;
+    applyCommon(ctx, g, gx, gy);
+    applyMask(ctx, g.mask);
+
+    const children = sorted.filter((l: any) => l.parentId === g.id).slice().sort((a, b) => a.zIndex - b.zIndex);
+    for (const l of children as any[]) {
+      if (!l.visible) continue;
+      if (l.type === "group") {
+        await renderGroup(l);
+        continue;
+      }
+      await renderLayer(l, true);
+    }
+
+    endMask(ctx, g.mask);
+    ctx.restore();
+  };
+
+  const renderLayer = async (l: any, insideGroup: boolean = false) => {
+    switch (l.type) {
       case "text": {
-        const l: any = layer;
-        const x = interpKF(l.kf?.x, time, l.x);
-        const y = interpKF(l.kf?.y, time, l.y);
-        const opacity = interpKF(l.kf?.opacity, time, l.opacity);
-        const size = interpKF(l.kf?.size, time, l.size);
+        let x = reactiveVal(interpKF(l.kf?.x, time, l.x), l, "x", beatPulse);
+        let y = reactiveVal(interpKF(l.kf?.y, time, l.y), l, "y", beatPulse);
+        let opacity = reactiveVal(interpKF(l.kf?.opacity, time, l.opacity), l, "opacity", beatPulse);
+        let size = reactiveVal(interpKF(l.kf?.size, time, l.size), l, "size", beatPulse);
         ctx.save();
+        const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
         applyMask(ctx, l.mask);
@@ -304,7 +370,6 @@ async function drawWorkerLayers(
         }
         ctx.fillText(l.text, x, y);
         endMask(ctx, l.mask);
-        // image mask post-pass
         if (l.mask && l.mask.type === "image" && l.mask.src) {
           let m = maskCache.get(l.mask.src) || null;
           if (!m) {
@@ -320,20 +385,21 @@ async function drawWorkerLayers(
             ctx.globalCompositeOperation = prev;
           }
         }
+        if (!insideGroup) endGroupHierarchy(ctx, chain);
         ctx.restore();
         break;
       }
       case "image": {
-        const l: any = layer;
-        const x = interpKF(l.kf?.x, time, l.x);
-        const y = interpKF(l.kf?.y, time, l.y);
-        const opacity = interpKF(l.kf?.opacity, time, l.opacity);
-        const size = interpKF(l.kf?.size, time, Math.max(l.width, l.height));
+        let x = reactiveVal(interpKF(l.kf?.x, time, l.x), l, "x", beatPulse);
+        let y = reactiveVal(interpKF(l.kf?.y, time, l.y), l, "y", beatPulse);
+        let opacity = reactiveVal(interpKF(l.kf?.opacity, time, l.opacity), l, "opacity", beatPulse);
+        let size = reactiveVal(interpKF(l.kf?.size, time, Math.max(l.width, l.height)), l, "size", beatPulse);
         const bmp = layerBitmaps.get(l.id) || null;
         if (!bmp) break;
         const w = l.width ?? size;
         const h = l.height ?? size;
         ctx.save();
+        const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
         if (l.clipCircle) {
@@ -359,15 +425,16 @@ async function drawWorkerLayers(
             ctx.globalCompositeOperation = prev;
           }
         }
+        if (!insideGroup) endGroupHierarchy(ctx, chain);
         ctx.restore();
         break;
       }
       case "shape": {
-        const l: any = layer;
-        const x = interpKF(l.kf?.x, time, l.x);
-        const y = interpKF(l.kf?.y, time, l.y);
-        const opacity = interpKF(l.kf?.opacity, time, l.opacity);
+        let x = reactiveVal(interpKF(l.kf?.x, time, l.x), l, "x", beatPulse);
+        let y = reactiveVal(interpKF(l.kf?.y, time, l.y), l, "y", beatPulse);
+        let opacity = reactiveVal(interpKF(l.kf?.opacity, time, l.opacity), l, "opacity", beatPulse);
         ctx.save();
+        const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
         applyMask(ctx, l.mask);
@@ -423,24 +490,25 @@ async function drawWorkerLayers(
             ctx.globalCompositeOperation = prev;
           }
         }
+        if (!insideGroup) endGroupHierarchy(ctx, chain);
         ctx.restore();
         break;
       }
       case "progressRing": {
-        const l: any = layer;
-        const x = interpKF(l.kf?.x, time, l.x);
-        const y = interpKF(l.kf?.y, time, l.y);
-        const opacity = interpKF(l.kf?.opacity, time, l.opacity);
-        const radius = interpKF(l.kf?.size, time, l.radius);
+        let x = reactiveVal(interpKF(l.kf?.x, time, l.x), l, "x", beatPulse);
+        let y = reactiveVal(interpKF(l.kf?.y, time, l.y), l, "y", beatPulse);
+        let opacity = reactiveVal(interpKF(l.kf?.opacity, time, l.opacity), l, "opacity", beatPulse);
+        let radius = reactiveVal(interpKF(l.kf?.size, time, l.radius), l, "size", beatPulse);
         const thick = l.thickness ?? 8;
         const t = duration > 0 ? Math.min(1, Math.max(0, time / duration)) : 0;
         const endAngle = -Math.PI / 2 + t * Math.PI * 2;
         ctx.save();
+        const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
         applyMask(ctx, l.mask);
-        ctx.lineWidth = thick;
-        ctx.strokeStyle = lerpColor(l.color1, l.color2, t);
+        (ctx as any).lineWidth = thick;
+        (ctx as any).strokeStyle = lerpColor(l.color1, l.color2, t);
         ctx.beginPath();
         ctx.arc(x, y, radius, -Math.PI / 2, endAngle);
         ctx.stroke();
@@ -458,31 +526,43 @@ async function drawWorkerLayers(
             ctx.globalCompositeOperation = prev;
           }
         }
+        if (!insideGroup) endGroupHierarchy(ctx, chain);
         ctx.restore();
         break;
       }
       case "particles": {
-        // per-frame simple particles; determinism across frames isn't required in offline mode
-        const l: any = layer;
+        const lp: any = l;
         ctx.save();
-        ctx.globalAlpha = l.opacity;
-        applyCommon(ctx, l, 0, 0);
-        applyMask(ctx, l.mask);
-        ctx.fillStyle = l.color;
-        const count = l.count;
-        const speed = l.speed * (1 + 0.5 * (beatPulse || 0));
+        const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, lp, time);
+        ctx.globalAlpha = lp.opacity;
+        applyCommon(ctx, lp, 0, 0);
+        applyMask(ctx, lp.mask);
+        ctx.fillStyle = lp.color;
+        const count = lp.count;
+        const speed = lp.speed * (1 + 0.5 * (beatPulse || 0));
         for (let i = 0; i < count; i++) {
           const px = Math.random() * width;
           const py = Math.random() * height;
-          const s = l.size * (1 + 0.3 * (beatPulse || 0));
+          const s = lp.size * (1 + 0.3 * (beatPulse || 0));
           ctx.beginPath();
           ctx.arc(px, py - speed, s, 0, Math.PI * 2);
           ctx.fill();
         }
-        endMask(ctx, l.mask);
+        endMask(ctx, lp.mask);
+        if (!insideGroup) endGroupHierarchy(ctx, chain);
         ctx.restore();
         break;
       }
+    }
+  };
+
+  for (const layer of sorted as any[]) {
+    if (!layer.visible) continue;
+    if (layer.parentId) continue; // rendered within its group
+    if (layer.type === "group") {
+      await renderGroup(layer);
+    } else {
+      await renderLayer(layer);
     }
   }
 }

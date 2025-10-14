@@ -23,6 +23,17 @@ function interpKF(kf: KeyframeNumber[] | undefined, t: number, base: number): nu
   return base;
 }
 
+function reactiveVal(base: number, layer: any, prop: "x" | "y" | "opacity" | "size", beatPulse: number): number {
+  const r = layer.reactive;
+  if (!r || r.target !== prop) return base;
+  const amt = r.amount ?? 0;
+  const sm = Math.max(0, Math.min(1, r.smooth ?? 0));
+  const p = beatPulse;
+  // simple smoothing: dampen pulse influence
+  const eff = p * (1 - sm) + (p * p) * sm * 0.5;
+  return base + amt * eff;
+}
+
 function applyCommon(ctx: CanvasRenderingContext2D, layer: any, x: number, y: number) {
   ctx.globalCompositeOperation = layer.blendMode || "source-over";
   ctx.shadowBlur = layer.shadowBlur || 0;
@@ -82,12 +93,17 @@ function applyImageMask(ctx: CanvasRenderingContext2D, mask: Mask | undefined, x
 function drawText(
   ctx: CanvasRenderingContext2D,
   layer: any,
-  time: number
+  time: number,
+  beatPulse: number
 ) {
-  const x = interpKF(layer.kf?.x, time, layer.x);
-  const y = interpKF(layer.kf?.y, time, layer.y);
-  const opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
-  const size = interpKF(layer.kf?.size, time, layer.size);
+  let x = interpKF(layer.kf?.x, time, layer.x);
+  let y = interpKF(layer.kf?.y, time, layer.y);
+  let opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
+  let size = interpKF(layer.kf?.size, time, layer.size);
+  x = reactiveVal(x, layer, "x", beatPulse);
+  y = reactiveVal(y, layer, "y", beatPulse);
+  opacity = reactiveVal(opacity, layer, "opacity", beatPulse);
+  size = reactiveVal(size, layer, "size", beatPulse);
 
   ctx.save();
   ctx.globalAlpha = opacity;
@@ -113,12 +129,17 @@ function drawText(
 function drawImage(
   ctx: CanvasRenderingContext2D,
   layer: any,
-  time: number
+  time: number,
+  beatPulse: number
 ) {
-  const x = interpKF(layer.kf?.x, time, layer.x);
-  const y = interpKF(layer.kf?.y, time, layer.y);
-  const opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
-  const size = interpKF(layer.kf?.size, time, Math.max(layer.width, layer.height));
+  let x = interpKF(layer.kf?.x, time, layer.x);
+  let y = interpKF(layer.kf?.y, time, layer.y);
+  let opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
+  let size = interpKF(layer.kf?.size, time, Math.max(layer.width, layer.height));
+  x = reactiveVal(x, layer, "x", beatPulse);
+  y = reactiveVal(y, layer, "y", beatPulse);
+  opacity = reactiveVal(opacity, layer, "opacity", beatPulse);
+  size = reactiveVal(size, layer, "size", beatPulse);
 
   const img = new Image();
   img.src = layer.src;
@@ -146,11 +167,16 @@ function drawImage(
 function drawShape(
   ctx: CanvasRenderingContext2D,
   layer: any,
-  time: number
+  time: number,
+  beatPulse: number
 ) {
-  const x = interpKF(layer.kf?.x, time, layer.x);
-  const y = interpKF(layer.kf?.y, time, layer.y);
-  const opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
+  let x = interpKF(layer.kf?.x, time, layer.x);
+  let y = interpKF(layer.kf?.y, time, layer.y);
+  let opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
+  x = reactiveVal(x, layer, "x", beatPulse);
+  y = reactiveVal(y, layer, "y", beatPulse);
+  opacity = reactiveVal(opacity, layer, "opacity", beatPulse);
+
   ctx.save();
   ctx.globalAlpha = opacity;
   applyCommon(ctx, layer, x, y);
@@ -214,12 +240,18 @@ function drawProgressRing(
   ctx: CanvasRenderingContext2D,
   layer: any,
   time: number,
-  duration: number
+  duration: number,
+  beatPulse: number
 ) {
-  const x = interpKF(layer.kf?.x, time, layer.x);
-  const y = interpKF(layer.kf?.y, time, layer.y);
-  const opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
-  const radius = interpKF(layer.kf?.size, time, layer.radius);
+  let x = interpKF(layer.kf?.x, time, layer.x);
+  let y = interpKF(layer.kf?.y, time, layer.y);
+  let opacity = interpKF(layer.kf?.opacity, time, layer.opacity);
+  let radius = interpKF(layer.kf?.size, time, layer.radius);
+  x = reactiveVal(x, layer, "x", beatPulse);
+  y = reactiveVal(y, layer, "y", beatPulse);
+  opacity = reactiveVal(opacity, layer, "opacity", beatPulse);
+  radius = reactiveVal(radius, layer, "size", beatPulse);
+
   const thick = layer.thickness ?? 8;
 
   const t = duration > 0 ? Math.min(1, Math.max(0, time / duration)) : 0;
@@ -277,6 +309,136 @@ function drawParticles(
   ctx.restore();
 }
 
+function renderGroup(
+  ctx: CanvasRenderingContext2D,
+  group: any,
+  width: number,
+  height: number,
+  template: TemplateConfig,
+  time: number,
+  duration: number,
+  beatPulse: number
+) {
+  const x = interpKF(group.kf?.x, time, group.x);
+  const y = interpKF(group.kf?.y, time, group.y);
+  const opacity = interpKF(group.kf?.opacity, time, group.opacity);
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  applyCommon(ctx, group, x, y);
+  applyMask(ctx, group.mask);
+
+  const children = (template.layers ?? [])
+    .filter((l) => (l as any).parentId === group.id)
+    .slice()
+    .sort((a, b) => a.zIndex - b.zIndex);
+
+  for (const child of children as any[]) {
+    if (!child.visible) continue;
+    switch (child.type) {
+      case "text":
+        drawText(ctx, child, time, beatPulse);
+        break;
+      case "image":
+        drawImage(ctx, child, time, beatPulse);
+        break;
+      case "shape":
+        drawShape(ctx, child, time, beatPulse);
+        break;
+      case "progressRing":
+        drawProgressRing(ctx, child, time, duration, beatPulse);
+        break;
+      case "particles":
+        drawParticles(ctx, child, width, height, beatPulse);
+        break;
+      case "group":
+        renderGroup(ctx, child, width, height, template, time, duration, beatPulse);
+        break;
+    }
+  }
+
+  endMask(ctx, group.mask);
+  ctx.restore();
+}
+
+export function drawLayers(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  template: TemplateConfig,
+  time: number,
+  duration: number,
+  beatPulse: number
+) {
+  const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
+  for (const layer of layers as any[]) {
+    if (!layer.visible) continue;
+    // render only root-level layers in this pass; groups will render their children recursively
+    if (layer.parentId) continue;
+    switch (layer.type) {
+      case "text":
+        drawText(ctx, layer, time, beatPulse);
+        break;
+      case "image":
+        drawImage(ctx, layer, time, beatPulse);
+        break;
+      case "shape":
+        drawShape(ctx, layer, time, beatPulse);
+        break;
+      case "progressRing":
+        drawProgressRing(ctx, layer, time, duration, beatPulse);
+        break;
+      case "particles":
+        drawParticles(ctx, layer, width, height, beatPulse);
+        break;
+      case "group":
+        renderGroup(ctx, layer, width, height, template, time, duration, beatPulse);
+        break;
+    }
+  }
+}
+
+// simple particles cache per invocation
+const particlesCache = new WeakMap<Layer, { x: number; y: number }[]>();
+
+function drawParticles(
+  ctx: CanvasRenderingContext2D,
+  layer: any,
+  width: number,
+  height: number,
+  beatPulse: number,
+  template: TemplateConfig,
+  time: number
+) {
+  let parts = particlesCache.get(layer);
+  if (!parts) {
+    parts = Array.from({ length: layer.count }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height
+    }));
+    particlesCache.set(layer, parts);
+  }
+
+  ctx.save();
+  const chain = beginGroupHierarchy(ctx, template, layer, time);
+  ctx.globalAlpha = layer.opacity;
+  applyMask(ctx, layer.mask);
+  ctx.fillStyle = layer.color;
+  const speed = layer.speed * (1 + 0.5 * (beatPulse || 0));
+  for (const p of parts) {
+    p.y -= speed;
+    if (p.y < -10) p.y = height + 10;
+    const s = layer.size * (1 + 0.3 * (beatPulse || 0));
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  endMask(ctx, layer.mask);
+  // image mask across full canvas if specified
+  applyImageMask(ctx, layer.mask, 0, 0, width, height);
+  endGroupHierarchy(ctx, chain);
+  ctx.restore();
+}
+
 export function drawLayers(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -289,21 +451,25 @@ export function drawLayers(
   const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
   for (const layer of layers) {
     if (!layer.visible) continue;
+    if ((layer as any).type === "group") {
+      // groups are containers; skip direct drawing
+      continue;
+    }
     switch (layer.type) {
       case "text":
-        drawText(ctx, layer, time);
+        drawText(ctx, layer, time, template);
         break;
       case "image":
-        drawImage(ctx, layer, time);
+        drawImage(ctx, layer, time, template);
         break;
       case "shape":
-        drawShape(ctx, layer, time);
+        drawShape(ctx, layer, time, template);
         break;
       case "progressRing":
-        drawProgressRing(ctx, layer, time, duration);
+        drawProgressRing(ctx, layer, time, duration, template);
         break;
       case "particles":
-        drawParticles(ctx, layer, width, height, beatPulse);
+        drawParticles(ctx, layer, width, height, beatPulse, template, time);
         break;
     }
   }

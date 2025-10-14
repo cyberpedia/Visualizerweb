@@ -73,8 +73,12 @@ function newParticlesLayer(): Layer {
 const LayerEditor: React.FC = () => {
   const template = usePlayerStore((s) => s.visualizerTemplate);
   const addLayer = usePlayerStore((s) => s.addLayer);
+  const addGroupLayer = usePlayerStore((s) => s.addGroupLayer);
   const updateLayer = usePlayerStore((s) => s.updateLayer);
   const removeLayer = usePlayerStore((s) => s.removeLayer);
+  const setLayerParent = usePlayerStore((s) => s.setLayerParent);
+  const setLayerLocked = usePlayerStore((s) => s.setLayerLocked);
+  const moveLayerZIndex = usePlayerStore((s) => s.moveLayerZIndex);
 
   const addKF = (id: string, prop: "x" | "y" | "opacity" | "size") => {
     const time = audioEngine.getCurrentTime();
@@ -89,6 +93,8 @@ const LayerEditor: React.FC = () => {
     const nextKF = [...(layer.kf?.[prop] ?? []), { time, value: base, easing: "linear" }];
     updateLayer(id, { kf: { ...layer.kf, [prop]: nextKF } } as any);
   };
+
+  const groupOptions = (template.layers ?? []).filter((l) => l.type === "group");
 
   return (
     <div className="p-3 border-t border-gray-800">
@@ -118,6 +124,13 @@ const LayerEditor: React.FC = () => {
             onClick={() => addLayer(newParticlesLayer())}
           >
             + Particles
+          </button>
+          <button
+            className="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500"
+            onClick={() => addGroupLayer({ zIndex: 50, x: 0, y: 0 })}
+            title="Add group"
+          >
+            + Group
           </button>
         </div>
       </div>
@@ -226,6 +239,100 @@ const LayerEditor: React.FC = () => {
                   onChange={(e) => updateLayer(layer.id, { shadowBlur: Number(e.target.value) } as any)}
                   className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                 />
+              </label>
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="text-xs">
+                Audio-reactive target
+                <select
+                  value={(layer as any).reactive?.target || ""}
+                  onChange={(e) => updateLayer(layer.id, { reactive: { ...((layer as any).reactive || {}), target: (e.target.value || undefined) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                >
+                  <option value="">(none)</option>
+                  <option value="x">x</option>
+                  <option value="y">y</option>
+                  <option value="opacity">opacity</option>
+                  <option value="size">size</option>
+                </select>
+              </label>
+              <label className="text-xs">
+                Source
+                <select
+                  value={(layer as any).reactive?.source || "beat"}
+                  onChange={(e) => updateLayer(layer.id, { reactive: { ...((layer as any).reactive || {}), source: e.target.value } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                >
+                  <option value="beat">beat</option>
+                </select>
+              </label>
+              <label className="text-xs">
+                Amount
+                <input
+                  type="number"
+                  step={0.1}
+                  value={(layer as any).reactive?.amount ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { reactive: { ...((layer as any).reactive || {}), amount: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Smooth
+                <input
+                  type="number"
+                  step={0.01}
+                  value={(layer as any).reactive?.smooth ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { reactive: { ...((layer as any).reactive || {}), smooth: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+            </div>
+
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="text-xs flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={(layer as any).locked || false}
+                  onChange={(e) => setLayerLocked(layer.id, e.target.checked)}
+                />
+                locked
+              </label>
+              <label className="text-xs">
+                z-index
+                <input
+                  type="number"
+                  value={layer.zIndex}
+                  onChange={(e) => moveLayerZIndex(layer.id, Number(e.target.value))}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+                <div className="mt-1 flex items-center gap-1">
+                  <button
+                    className="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                    onClick={() => moveLayerZIndex(layer.id, layer.zIndex + 1)}
+                  >
+                    Up
+                  </button>
+                  <button
+                    className="text-[11px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                    onClick={() => moveLayerZIndex(layer.id, Math.max(0, layer.zIndex - 1))}
+                  >
+                    Down
+                  </button>
+                </div>
+              </label>
+              <label className="text-xs">
+                Parent group
+                <select
+                  value={(layer as any).parentId || ""}
+                  onChange={(e) => setLayerParent(layer.id, e.target.value || null)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                >
+                  <option value="">(none)</option>
+                  {(template.layers ?? []).filter((l) => (l as any).type === "group").map((g) => (
+                    <option key={g.id} value={g.id}>{`group (${g.id.slice(0,6)})`}</option>
+                  ))}
+                </select>
               </label>
             </div>
 
@@ -626,6 +733,61 @@ const LayerEditor: React.FC = () => {
                 >
                   + radius keyframe
                 </button>
+              </div>
+            )}
+
+            {layer.type === "group" && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <label className="text-xs">
+                  Rotation (deg)
+                  <input
+                    type="number"
+                    value={(layer as any).rotation || 0}
+                    onChange={(e) => updateLayer(layer.id, { rotation: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Scale X
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={(layer as any).scaleX ?? 1}
+                    onChange={(e) => updateLayer(layer.id, { scaleX: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Scale Y
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={(layer as any).scaleY ?? 1}
+                    onChange={(e) => updateLayer(layer.id, { scaleY: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Anchor X
+                  <input
+                    type="number"
+                    value={(layer as any).anchorX ?? 0}
+                    onChange={(e) => updateLayer(layer.id, { anchorX: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <label className="text-xs">
+                  Anchor Y
+                  <input
+                    type="number"
+                    value={(layer as any).anchorY ?? 0}
+                    onChange={(e) => updateLayer(layer.id, { anchorY: Number(e.target.value) } as any)}
+                    className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                  />
+                </label>
+                <div className="text-[11px] text-gray-400 col-span-3">
+                  Group transforms affect all child layers (parented to this group). Use masks on the group to clip children collectively.
+                </div>
               </div>
             )}
 
