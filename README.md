@@ -42,7 +42,7 @@ Visualizers and overlays
 - Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle/image/polygon) on Canvas/Offline paths; WebGL path supports additive and shader-based multiply/screen for overlays and layers with rect/circle/image masks (polygon masks for text/image via rasterized mask textures)
 - WebGL per-layer filters (text, image, shape): blur, hue-rotate, saturate, brightness, contrast. Filters are applied as offscreen passes and composited with the chosen blend mode or source-over.
 - Circle mask transform (WebGL): translation and scaling on mask center/radius for text/image layers; rect mask supports translation/scale via scissor.
-- Keyframe timeline for animatable properties (x, y, opacity, size, rotation) with zoom, markers, click-to-add, multi-select and group drag, copy/paste across lanes, and bezier easing per keyframe with both a dedicated editor and inline segment handle overlays
+- Keyframe timeline for animatable properties (x, y, opacity, size, rotation) with zoom, markers, click-to-add, multi-select and group drag, copy/paste (with optional relative offsets), lane-aware snapping, invert selection, duplicate to markers, normalize lane values, and bezier easing per keyframe with both a dedicated editor and inline segment handle overlays (including on-curve handles)
 - Template Gallery with defaults, user presets; template import/export (JSON)
 - Editor grid overlay with configurable grid size (for alignment)
 

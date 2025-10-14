@@ -76,6 +76,39 @@ const TimelineEditor: React.FC = () => {
   // inline bezier segment editor state
   const [inlineBezierEdit, setInlineBezierEdit] = useState<{ prop: PropKey; startIndex: number; dragging: "p1" | "p2" | null } | null>(null);
 
+  // undo/redo stacks for selected layer's keyframes
+  const [undoStack, setUndoStack] = useState<any[]>([]);
+  const [redoStack, setRedoStack] = useState<any[]>([]);
+
+  const pushUndo = () => {
+    if (!selected) return;
+    const snap = JSON.parse(JSON.stringify(selected.kf || {}));
+    setUndoStack((prev) => [...prev, snap]);
+    setRedoStack([]);
+  };
+  const undo = () => {
+    if (!selected) return;
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev.slice();
+      const snap = next.pop()!;
+      setRedoStack((r) => [JSON.parse(JSON.stringify(selected.kf || {})), ...r]);
+      updateLayer(selected.id, { kf: snap });
+      return next;
+    });
+  };
+  const redo = () => {
+    if (!selected) return;
+    setRedoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const next = prev.slice();
+      const snap = next.shift()!;
+      setUndoStack((u) => [...u, JSON.parse(JSON.stringify(selected.kf || {}))]);
+      updateLayer(selected.id, { kf: snap });
+      return next;
+    });
+  };
+
   const toggleLaneSnap = (p: PropKey, enabled: boolean) =>
     setLaneSnap((prev) => ({ ...prev, [p]: { enabled, step: prev[p]?.step ?? snapStep } }));
   const setLaneSnapStep = (p: PropKey, step: number) =>
@@ -118,8 +151,10 @@ const TimelineEditor: React.FC = () => {
     const list = Array.isArray(nextKf[prop]) ? nextKf[prop].slice() : [];
     list.splice(idx, 1);
     nextKf[prop] = list;
+    pushUndo();
     updateLayer(selected.id, { kf: nextKf });
-  };
+_code  new}</;
+
 
   const removeKeyframeFor = (propKey: PropKey, idx: number) => {
     if (!selected) return;
@@ -127,8 +162,10 @@ const TimelineEditor: React.FC = () => {
     const list = Array.isArray(nextKf[propKey]) ? nextKf[propKey].slice() : [];
     list.splice(idx, 1);
     nextKf[propKey] = list;
+    pushUndo();
     updateLayer(selected.id, { kf: nextKf });
-  };
+_code  new}</;
+
 
   return (
     <div className="p-3 border-t border-gray-800">
@@ -191,14 +228,35 @@ const TimelineEditor: React.FC = () => {
             if (clipboardKFs.length > 0) {
               const nextKf = { ...(selected.kf || {}) } as any;
               const tPaste = snapTime(audioEngine.getCurrentTime());
-              for (const item of clipboardKFs) {
-                const list = Array.isArray(nextKf[item.prop]) ? nextKf[item.prop].slice() : [];
-                list.push({ ...item.kf, time: tPaste });
-                nextKf[item.prop] = list;
+              // paste with offsets if Shift is held
+              if (e.shiftKey) {
+                const minT = Math.min(...clipboardKFs.map((c) => c.kf.time ?? 0));
+                for (const item of clipboardKFs) {
+                  const list = Array.isArray(nextKf[item.prop]) ? nextKf[item.prop].slice() : [];
+                  const newTime = tPaste + ((item.kf.time ?? 0) - minT);
+                  list.push({ ...item.kf, time: newTime });
+                  nextKf[item.prop] = list;
+                }
+              } else {
+                for (const item of clipboardKFs) {
+                  const list = Array.isArray(nextKf[item.prop]) ? nextKf[item.prop].slice() : [];
+                  list.push({ ...item.kf, time: tPaste });
+                  nextKf[item.prop] = list;
+                }
               }
+              pushUndo();
               updateLayer(selected.id, { kf: nextKf });
               e.preventDefault();
             }
+          }
+          // Undo/Redo
+          else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+            e.preventDefault();
+            undo();
+          }
+          else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+            e.preventDefault();
+            redo();
           }
 
           // Nudge left/right for selected or active keyframe(s)
@@ -383,11 +441,128 @@ const TimelineEditor: React.FC = () => {
               list.push({ ...item.kf, time: tPaste });
             }
             nextKf[prop] = list;
+            pushUndo();
             updateLayer(selected.id, { kf: nextKf });
           }}
           title="Paste clipboard keyframes into current lane at current time"
         >
           Paste into lane
+        </button>
+
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected || clipboardKFs.length === 0}
+          onClick={() => {
+            if (!selected || clipboardKFs.length === 0) return;
+            const tPaste = snapTime(audioEngine.getCurrentTime());
+            const nextKf = { ...(selected.kf || {}) } as any;
+            const list = Array.isArray(nextKf[prop]) ? nextKf[prop].slice() : [];
+            const minT = Math.min(...clipboardKFs.map((c) => c.kf.time ?? 0));
+            for (const item of clipboardKFs) {
+              const newTime = tPaste + ((item.kf.time ?? 0) - minT);
+              list.push({ ...item.kf, time: newTime });
+            }
+            nextKf[prop] = list;
+            pushUndo();
+            updateLayer(selected.id, { kf: nextKf });
+          }}
+          title="Paste clipboard keyframes preserving relative offsets"
+        >
+          Paste with offsets
+        </button>
+
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected}
+          onClick={() => {
+            if (!selected) return;
+            const allInLane = ((selected.kf?.[prop] as any[]) || []);
+            const current = selectedKFs.map((s) => s.index);
+            const inverted = allInLane.map((_, idx) => ({ prop, index: idx })).filter((item) => !current.includes(item.index));
+            setSelectedKFs(inverted);
+          }}
+          title="Invert selection (current lane)"
+        >
+          Invert (lane)
+        </button>
+
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected}
+          onClick={() => {
+            if (!selected) return;
+            const all: Array<{ prop: PropKey; index: number }> = [];
+            for (const p of props) {
+              const arr = ((selected.kf?.[p] as any[]) || []);
+              arr.forEach((_, idx) => all.push({ prop: p, index: idx }));
+            }
+            const currentSet = new Set(selectedKFs.map((s) => `${s.prop}:${s.index}`));
+            const inverted = all.filter((it) => !currentSet.has(`${it.prop}:${it.index}`));
+            setSelectedKFs(inverted);
+          }}
+          title="Invert selection (layer)"
+        >
+          Invert (layer)
+        </button>
+
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected || selectedKFs.length === 0}
+          onClick={() => {
+            if (!selected || selectedKFs.length === 0) return;
+            const nextKf = { ...(selected.kf || {}) } as any;
+            for (const m of markers) {
+              const list = Array.isArray(nextKf[prop]) ? nextKf[prop].slice() : [];
+              for (const s of selectedKFs.filter((skf) => skf.prop === prop)) {
+                const cur = ((selected.kf?.[prop] as any[]) || [])[s.index];
+                if (cur) list.push({ ...cur, time: m });
+              }
+              nextKf[prop] = list;
+            }
+            pushUndo();
+            updateLayer(selected.id, { kf: nextKf });
+          }}
+          title="Duplicate selected keyframes to all markers (current lane)"
+        >
+          Duplicate to markers
+        </button>
+
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected}
+          onClick={() => {
+            if (!selected) return;
+            const arr = ((selected.kf?.[prop] as any[]) || []).slice().sort((a, b) => a.time - b.time);
+            if (arr.length === 0) return;
+            const vMin = Math.min(...arr.map((k: any) => k.value ?? 0));
+            const vMax = Math.max(...arr.map((k: any) => k.value ?? 0));
+            const vRange = vMax - vMin || 1;
+            const nextKf = { ...(selected.kf || {}) } as any;
+            const list = arr.map((k: any) => ({ ...k, value: (k.value - vMin) / vRange }));
+            nextKf[prop] = list;
+            pushUndo();
+            updateLayer(selected.id, { kf: nextKf });
+          }}
+          title="Normalize current lane values to 0..1"
+        >
+          Normalize lane
+        </button>
+
+        <button
+          className="ml-auto px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected || undoStack.length === 0}
+          onClick={() => undo()}
+          title="Undo (Ctrl/Cmd+Z)"
+        >
+          Undo
+        </button>
+        <button
+          className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected || redoStack.length === 0}
+          onClick={() => redo()}
+          title="Redo (Ctrl/Cmd+Y)"
+        >
+          Redo
         </button>
 
         {/* Lane snap override */}
@@ -410,6 +585,41 @@ const TimelineEditor: React.FC = () => {
             className="w-24 bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs ml-1"
           />
         </label>
+
+        <button
+          className="ml-4 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          disabled={!selected}
+          onClick={() => {
+            if (!selected) return;
+            const arr = ((selected.kf?.[prop] as any[]) || []);
+            if (arr.length === 0) return;
+            const ms = markers.slice().sort((a, b) => a - b);
+            let start = 0, end = audioEngine.getDuration() || 60;
+            const ct = audioEngine.getCurrentTime();
+            if (ms.length >= 2) {
+              let prev = ms[0], next = ms[ms.length - 1];
+              for (let i = 0; i < ms.length - 1; i++) {
+                if (ct >= ms[i] && ct <= ms[i + 1]) {
+                  prev = ms[i]; next = ms[i + 1]; break;
+                }
+              }
+              start = prev; end = next;
+            } else {
+              start = Math.max(0, ct - 2);
+              end = Math.min(end, ct + 2);
+            }
+            const selectedRange = arr
+              .map((_, idx) => ({ prop, index: idx }))
+              .filter((item) => {
+                const k = arr[item.index];
+                return (k.time ?? 0) >= start && (k.time ?? 0) <= end;
+              });
+            setSelectedKFs(selectedRange);
+          }}
+          title="Select range around current time (between nearest markers or ±2s)"
+        >
+          Select range (lane)
+        </button>
       </div>
 
       {/* Multi-lane timeline tracks */}
@@ -502,13 +712,32 @@ const TimelineEditor: React.FC = () => {
                     updateLayer(selected.id, { kf: nextKf });
                   }}
                   onMouseMove={(e) => {
-                    if (draggingIdx == null || draggingProp == null) return;
-                    if (draggingProp !== laneProp) return;
                     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                     const x = e.clientX - rect.left;
                     const y = e.clientY - rect.top;
                     const w = rect.width;
                     const h = rect.height;
+
+                    // inline bezier handle drag
+                    if (inlineBezierEdit && inlineBezierEdit.prop === laneProp && inlineBezierEdit.dragging) {
+                      const xn = Math.max(0, Math.min(1, x / w));
+                      const yn = Math.max(0, Math.min(1, y / h));
+                      // read current segment start bezier
+                      const segStart = sortedKfs[inlineBezierEdit.startIndex];
+                      const bz = (segStart?.bezier) || { x1: 0.25, y1: 0.1, x2: 0.25, y2: 1 };
+                      const newBz = {
+                        x1: inlineBezierEdit.dragging === "p1" ? xn : bz.x1,
+                        y1: inlineBezierEdit.dragging === "p1" ? (1 - yn) : bz.y1,
+                        x2: inlineBezierEdit.dragging === "p2" ? xn : bz.x2,
+                        y2: inlineBezierEdit.dragging === "p2" ? (1 - yn) : bz.y2
+                      };
+                      updateKeyframeFor(laneProp, inlineBezierEdit.startIndex, { easing: "bezier", bezier: newBz } as any);
+                      return;
+                    }
+
+                    if (draggingIdx == null || draggingProp == null) return;
+                    if (draggingProp !== laneProp) return;
+
                     const t = snapTimeExt(Math.max(0, Math.min(dur, (x / w) * dur)));
                     const valNorm = 1 - Math.max(0, Math.min(1, y / h));
                     const val = vMin + valNorm * vRange;
@@ -533,8 +762,8 @@ const TimelineEditor: React.FC = () => {
                       updateKeyframeFor(laneProp, draggingIdx, { time: t, value: val });
                     }
                   }}
-                  onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); }}
-                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); }}
+                  onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); setInlineBezierEdit(null); }}
+                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); setInlineBezierEdit(null); }}
                   title={`Click to add keyframe on ${laneProp}`}
                 >
                   {/* grid lines */}
@@ -599,7 +828,7 @@ const TimelineEditor: React.FC = () => {
                     const mid = (a.time + b.time) * 0.5;
                     const leftPct = (Math.min(1, mid / dur) * 100) * (1 / zoom);
                     // mini box 64x64 positioned near segment center
-                    return (
+                    const box = (
                       <div
                         key={`seg-${j}`}
                         className="absolute -translate-x-1/2"
@@ -651,6 +880,30 @@ const TimelineEditor: React.FC = () => {
                           </svg>
                         </div>
                       </div>
+                    );
+
+                    // inline overlay handles directly on lane
+                    const left1 = (Math.min(1, (a.time + (b.time - a.time) * bz.x1) / dur) * 100) * (1 / zoom);
+                    const top1 = (1 - bz.y1) * 100;
+                    const left2 = (Math.min(1, (a.time + (b.time - a.time) * bz.x2) / dur) * 100) * (1 / zoom);
+                    const top2 = (1 - bz.y2) * 100;
+
+                    return (
+                      <>
+                        {box}
+                        <div
+                          className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-500 rounded-full cursor-move"
+                          style={{ left: `${left1}%`, top: `${top1}%` }}
+                          onMouseDown={() => setInlineBezierEdit({ prop: laneProp, startIndex: j, dragging: "p1" })}
+                          title="Bezier handle P1"
+                        />
+                        <div
+                          className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-500 rounded-full cursor-move"
+                          style={{ left: `${left2}%`, top: `${top2}%` }}
+                          onMouseDown={() => setInlineBezierEdit({ prop: laneProp, startIndex: j, dragging: "p2" })}
+                          title="Bezier handle P2"
+                        />
+                      </>
                     );
                   })}
                 </div>
