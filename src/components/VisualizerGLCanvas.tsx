@@ -1535,11 +1535,23 @@ void main(){
           const opacity = interpKF(layer.kf?.opacity, tSec, layer.opacity);
           const appliedRect = applyRectMask(layer.mask, dpr, layer.maskTransform);
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
-          if (specialBlend) {
+
+          const filters = (layer as any).filters || {};
+          const blurPx = Math.max(0.0, filters.blur || 0.0);
+          const hueDeg = filters.hue || 0.0;
+          const sat = filters.saturate !== undefined ? filters.saturate : 1.0;
+          const bright = filters.brightness !== undefined ? filters.brightness : 1.0;
+          const contr = filters.contrast !== undefined ? filters.contrast : 1.0;
+          const hasColorAdjust = Math.abs(hueDeg) > 0.001 || Math.abs(sat - 1.0) > 0.001 || Math.abs(bright - 1.0) > 0.001 || Math.abs(contr - 1.0) > 0.001;
+          const hasFilters = (blurPx > 0.0) || hasColorAdjust;
+          const needsOffscreen = specialBlend || hasFilters;
+
+          if (needsOffscreen) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
           }
+
           if (layer.shape === "rect") {
             const w = layer.width ?? 100;
             const h = layer.height ?? 50;
@@ -1584,7 +1596,76 @@ void main(){
 
           if (appliedRect) endMask();
 
-          if (specialBlend) {
+          if (needsOffscreen) {
+            let currentTex: WebGLTexture = texLayer!;
+            if (blurPx > 0.0) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboPing);
+              gl.useProgram(progBlur);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosQuadLoc);
+              gl.vertexAttribPointer(aPosQuadLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexQuadLoc);
+              gl.vertexAttribPointer(aTexQuadLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uTexBlurLoc, 0);
+              gl.uniform2f(uTexelLoc, blurPx / canvas.width, 0.0);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboPong);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, texPing!);
+              gl.uniform1i(uTexBlurLoc, 0);
+              gl.uniform2f(uTexelLoc, 0.0, blurPx / canvas.height);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              currentTex = texPong!;
+            }
+
+            if (hasColorAdjust) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+              gl.useProgram(progFilter);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosFiltLoc);
+              gl.vertexAttribPointer(aPosFiltLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexFiltLoc);
+              gl.vertexAttribPointer(aTexFiltLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uTexFilterLoc, 0);
+              gl.uniform1f(uHueLoc, hueDeg);
+              gl.uniform1f(uSatLoc, sat);
+              gl.uniform1f(uBrightLoc, bright);
+              gl.uniform1f(uContrastLoc, contr);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              const tTmp2 = texLayer; texLayer = texScratch; texScratch = tTmp2;
+              const fTmp2 = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2;
+              currentTex = texLayer!;
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+            }
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+            gl.useProgram(progLayerComposite);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+            gl.enableVertexAttribArray(aPosLCLoc);
+            gl.vertexAttribPointer(aPosLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+            gl.enableVertexAttribArray(aTexLCLoc);
+            gl.vertexAttribPointer(aTexLCLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texScene!);
+            gl.uniform1i(uSceneLCLoc, 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, currentTex);
+            gl.uniform1i(uLayerLCLoc, 1);
+            gl.uniform1i(uModeLCLoc, specialBlend ? (layer.blendMode === "multiply" ? 1 : 2) : 0);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
+            const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+          } else if (specialBlend) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
             gl.useProgram(progLayerComposite);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
