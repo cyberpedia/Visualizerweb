@@ -76,6 +76,9 @@ const TimelineEditor: React.FC = () => {
   // inline bezier segment editor state
   const [inlineBezierEdit, setInlineBezierEdit] = useState<{ prop: PropKey; startIndex: number; dragging: "p1" | "p2" | null } | null>(null);
 
+  // drag-rectangle brush selection
+  const [brush, setBrush] = useState<{ active: boolean; lane: PropKey | null; x0: number; y0: number; x1: number; y1: number } | null>(null);
+
   // undo/redo stacks for selected layer's keyframes
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
@@ -153,7 +156,7 @@ const TimelineEditor: React.FC = () => {
     nextKf[prop] = list;
     pushUndo();
     updateLayer(selected.id, { kf: nextKf });
-_code  new}</;
+  };
 
 
   const removeKeyframeFor = (propKey: PropKey, idx: number) => {
@@ -164,7 +167,7 @@ _code  new}</;
     nextKf[propKey] = list;
     pushUndo();
     updateLayer(selected.id, { kf: nextKf });
-_code  new}</;
+  };
 
 
   return (
@@ -695,7 +698,19 @@ _code  new}</;
 
                 <div
                   className="absolute inset-0"
+                  onMouseDown={(e) => {
+                    // Alt+Drag starts brush selection
+                    if (e.altKey) {
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const x = e.clientX - rect.left;
+                      const y = e.clientY - rect.top;
+                      setBrush({ active: true, lane: laneProp, x0: x, y0: y, x1: x, y1: y });
+                      e.preventDefault();
+                    }
+                  }}
                   onClick={(e) => {
+                    // skip add on brush start
+                    if (brush?.active) return;
                     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                     const x = e.clientX - rect.left;
                     const y = e.clientY - rect.top;
@@ -717,6 +732,12 @@ _code  new}</;
                     const y = e.clientY - rect.top;
                     const w = rect.width;
                     const h = rect.height;
+
+                    // brush update
+                    if (brush?.active && brush.lane === laneProp) {
+                      setBrush((prev) => prev ? { ...prev, x1: x, y1: y } : prev);
+                      return;
+                    }
 
                     // inline bezier handle drag
                     if (inlineBezierEdit && inlineBezierEdit.prop === laneProp && inlineBezierEdit.dragging) {
@@ -748,10 +769,9 @@ _code  new}</;
                       const dt = dx * dur;
                       const nextKf = { ...(selected.kf || {}) } as any;
                       for (const s of selectedKFs) {
-                        if (s.prop !== laneProp) continue;
                         const arr = (nextKf[s.prop] || []).slice();
                         if (arr[s.index]) {
-                          const nt = snapTimeExt(Math.max(0, Math.min(dur, (groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s.index)?.time ?? arr[s.index].time) + dt)));
+                          const base = groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s(Math.max(0, Math.min(dur, (groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s.index)?.time ?? arr[s.index].time) + dt)));
                           arr[s.index] = { ...arr[s.index], time: nt };
                           nextKf[s.prop] = arr;
                         }
@@ -762,7 +782,35 @@ _code  new}</;
                       updateKeyframeFor(laneProp, draggingIdx, { time: t, value: val });
                     }
                   }}
-                  onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); setInlineBezierEdit(null); }}
+                  onMouseUp={(e) => {
+                    // finalize brush selection
+                    if (brush?.active && brush.lane === laneProp) {
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const w = rect.width, h = rect.height;
+                      const x0 = Math.min(brush.x0, brush.x1);
+                      const y0 = Math.min(brush.y0, brush.y1);
+                      const x1 = Math.max(brush.x0, brush.x1);
+                      const y1 = Math.max(brush.y0, brush.y1);
+                      const t0 = snapTimeExt((x0 / w) * dur);
+                      const t1 = snapTimeExt((x1 / w) * dur);
+                      const v0 = vMin + (1 - Math.max(0, Math.min(1, y1 / h))) * vRange; // bottom bound
+                      const v1 = vMin + (1 - Math.max(0, Math.min(1, y0 / h))) * vRange; // top bound
+                      const inRect = ((selected.kf?.[laneProp] as any[]) || [])
+                        .map((k: any, idx: number) => ({ k, idx }))
+                        .filter(({ k }) => {
+                          const kt = k.time ?? 0;
+                          const kv = k.value ?? baseVal;
+                          return kt >= Math.min(t0, t1) && kt <= Math.max(t0, t1) && kv >= Math.min(v0, v1) && kv <= Math.max(v0, v1);
+                        })
+                        .map(({ idx }) => ({ prop: laneProp, index: idx }));
+                      setSelectedKFs(inRect);
+                      setBrush(null);
+                    }
+                    setDraggingIdx(null);
+                    setDraggingProp(null);
+                    setGroupDrag(null);
+                    setInlineBezierEdit(null);
+                  }}
                   onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); setInlineBezierEdit(null); }}
                   title={`Click to add keyframe on ${laneProp}`}
                 >
@@ -773,6 +821,19 @@ _code  new}</;
                       style={{ left: `${(i / 10) * 100}%` }}
                     />
                   ))}
+
+                  {/* brush overlay */}
+                  {brush?.active && brush.lane === laneProp && (
+                    <div
+                      className="absolute border border-indigo-400/80 bg-indigo-400/10"
+                      style={{
+                        left: `${Math.min(brush.x0, brush.x1)}px`,
+                        top: `${Math.min(brush.y0, brush.y1)}px`,
+                        width: `${Math.abs(brush.x1 - brush.x0)}px`,
+                        height: `${Math.abs(brush.y1 - brush.y0)}px`
+                      }}
+                    />
+                  )}
                   {/* markers */}
                   {markers.map((m, i) => (
                     <div key={i}
@@ -807,14 +868,16 @@ _code  new}</;
                         } else {
                           setSelectedKFs([{ prop: laneProp, index: i }]);
                         }
-                        // prepare group drag start
-                        const arr = ((selected.kf?.[laneProp] as any[]) || []).slice();
-                        const startTimes = (ev.shiftKey ? selectedKFs : [{ prop: laneProp, index: i }]).map((sel) => {
-                          const cur = arr[sel.index];
-                          return { prop: sel.prop, index: sel.index, time: cur?.time ?? 0 };
-                        });
+                        // prepare group drag start across all selected lanes
+                        const curSelected = ev.shiftKey ? selectedKFs : [{ prop: laneProp, index: i }];
+                        const nextStartTimes: Array<{ prop: PropKey; index: number; time: number }> = [];
+                        for (const sel of curSelected) {
+                          const arrLane = ((selected.kf?.[sel.prop] as any[]) || []).slice();
+                          const cur = arrLane[sel.index];
+                          nextStartTimes.push({ prop: sel.prop, index: sel.index, time: cur?.time ?? 0 });
+                        }
                         const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
-                        setGroupDrag({ prop: laneProp, startX: ev.clientX - rect.left, startTimes });
+                        setGroupDrag({ prop: laneProp, startX: ev.clientX - rect.left, startTimes: nextStartTimes });
                       }}
                     />
                   ))}
@@ -892,13 +955,13 @@ _code  new}</;
                       <>
                         {box}
                         <div
-                          className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-500 rounded-full cursor-move"
+                          className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-500 rounded-full cursor-move hover:bg-indigo-400 hover:scale-125 transition-transform transition-colors"
                           style={{ left: `${left1}%`, top: `${top1}%` }}
                           onMouseDown={() => setInlineBezierEdit({ prop: laneProp, startIndex: j, dragging: "p1" })}
                           title="Bezier handle P1"
                         />
                         <div
-                          className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-500 rounded-full cursor-move"
+                          className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-indigo-500 rounded-full cursor-move hover:bg-indigo-400 hover:scale-125 transition-transform transition-colors"
                           style={{ left: `${left2}%`, top: `${top2}%` }}
                           onMouseDown={() => setInlineBezierEdit({ prop: laneProp, startIndex: j, dragging: "p2" })}
                           title="Bezier handle P2"

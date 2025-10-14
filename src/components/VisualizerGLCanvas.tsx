@@ -282,9 +282,21 @@ varying vec2 vTex;
 uniform sampler2D uTex;
 uniform sampler2D uMask;
 uniform float uAlpha;
+uniform vec2 uMaskScale;
+uniform vec2 uMaskOffset;
+uniform float uMaskRotation;
 void main(){
   vec4 c = texture2D(uTex, vTex);
-  float m = texture2D(uMask, vTex).a;
+  // transform mask UV around center (0.5, 0.5)
+  vec2 center = vec2(0.5, 0.5);
+  float s = sin(uMaskRotation);
+  float cR = cos(uMaskRotation);
+  mat2 rot = mat2(cR, -s, s, cR);
+  vec2 uv = vTex - center;
+  uv = rot * uv;
+  uv = uv * uMaskScale + center + uMaskOffset;
+  uv = clamp(uv, 0.0, 1.0);
+  float m = texture2D(uMask, uv).a;
   gl_FragColor = vec4(c.rgb, c.a * uAlpha * m);
 }
 `;
@@ -296,10 +308,21 @@ uniform sampler2D uTex;
 uniform sampler2D uMask;
 uniform vec3 uTextColor;
 uniform float uAlpha;
+uniform vec2 uMaskScale;
+uniform vec2 uMaskOffset;
+uniform float uMaskRotation;
 void main(){
   float dSdf = texture2D(uTex, vTex).a;
   float a = smoothstep(0.5 - 0.12, 0.5 + 0.12, dSdf);
-  float m = texture2D(uMask, vTex).a;
+  vec2 center = vec2(0.5, 0.5);
+  float s = sin(uMaskRotation);
+  float cR = cos(uMaskRotation);
+  mat2 rot = mat2(cR, -s, s, cR);
+  vec2 uv = vTex - center;
+  uv = rot * uv;
+  uv = uv * uMaskScale + center + uMaskOffset;
+  uv = clamp(uv, 0.0, 1.0);
+  float m = texture2D(uMask, uv).a;
   gl_FragColor = vec4(uTextColor, a * uAlpha * m);
 }
 `;
@@ -493,6 +516,9 @@ void main(){
     const uAlphaTexImgMaskLoc = gl.getUniformLocation(progTexImgMask, "uAlpha");
     const uSamplerTexImgLoc = gl.getUniformLocation(progTexImgMask, "uTex");
     const uSamplerMaskImgLoc = gl.getUniformLocation(progTexImgMask, "uMask");
+    const uMaskScaleTexImgLoc = gl.getUniformLocation(progTexImgMask, "uMaskScale");
+    const uMaskOffsetTexImgLoc = gl.getUniformLocation(progTexImgMask, "uMaskOffset");
+    const uMaskRotTexImgLoc = gl.getUniformLocation(progTexImgMask, "uMaskRotation");
 
     // SDF text locations
     const aPosSDFLoc = gl.getAttribLocation(progSDF, "aPos");
@@ -517,6 +543,9 @@ void main(){
     const uSamplerMaskSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uMask");
     const uTextColorSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uTextColor");
     const uAlphaSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uAlpha");
+    const uMaskScaleSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uMaskScale");
+    const uMaskOffsetSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uMaskOffset");
+    const uMaskRotSDFImgLoc = gl.getUniformLocation(progSDFImgMask, "uMaskRotation");
 
     // Blur/composite locations
     const aPosQuadLoc = gl.getAttribLocation(progBlur, "aPos");
@@ -1277,6 +1306,13 @@ void main(){
             if (!mInfo) {
               void makeTextureFromImage(layer.mask.src);
             } else {
+              const mtx = (layer as any).maskTransform || {};
+              const sX = mtx.scaleX || 1.0;
+              const sY = mtx.scaleY || 1.0;
+              const offX = (mtx.x || 0) / t.w;
+              const offY = (mtx.y || 0) / t.h;
+              const rotRad = ((mtx.rotation || 0) * Math.PI) / 180.0;
+
               gl.useProgram(progSDFImgMask);
               gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
               gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
@@ -1285,17 +1321,27 @@ void main(){
               gl.enableVertexAttribArray(aTexSDFImgMaskLoc);
               gl.vertexAttribPointer(aTexSDFImgMaskLoc, 2, gl.FLOAT, false, 16, 8);
               gl.activeTexture(gl.TEXTURE0);
-              gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+              gl.bindTexture(gl.TEXTURE_2D, t.tex);
               gl.uniform1i(uSamplerSDFImgMaskLoc, 0);
               gl.activeTexture(gl.TEXTURE1);
               gl.bindTexture(gl.TEXTURE_2D, mInfo.tex);
               gl.uniform1i(uSamplerMaskSDFImgLoc, 1);
               gl.uniform3f(uTextColorSDFImgLoc, col[0], col[1], col[2]);
               gl.uniform1f(uAlphaSDFImgLoc, opacity);
+              gl.uniform2f(uMaskScaleSDFImgLoc, sX, sY);
+              gl.uniform2f(uMaskOffsetSDFImgLoc, offX, offY);
+              gl.uniform1f(uMaskRotSDFImgLoc, rotRad);
               gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
             }
           } else if (isImageMask && layer.mask.type === "polygon" && Array.isArray(layer.mask.points)) {
             const maskTexInfo = makePolygonMaskTexture(t.w, t.h, layer.mask.points);
+            const mtx = (layer as any).maskTransform || {};
+            const sX = mtx.scaleX || 1.0;
+            const sY = mtx.scaleY || 1.0;
+            const offX = (mtx.x || 0) / t.w;
+            const offY = (mtx.y || 0) / t.h;
+            const rotRad = ((mtx.rotation || 0) * Math.PI) / 180.0;
+
             gl.useProgram(progSDFImgMask);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
             gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
@@ -1311,6 +1357,9 @@ void main(){
             gl.uniform1i(uSamplerMaskSDFImgLoc, 1);
             gl.uniform3f(uTextColorSDFImgLoc, col[0], col[1], col[2]);
             gl.uniform1f(uAlphaSDFImgLoc, opacity);
+            gl.uniform2f(uMaskScaleSDFImgLoc, sX, sY);
+            gl.uniform2f(uMaskOffsetSDFImgLoc, offX, offY);
+            gl.uniform1f(uMaskRotSDFImgLoc, rotRad);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
           } else {
             gl.useProgram(progSDF);
@@ -1435,9 +1484,11 @@ void main(){
           }
 
           if (isCircleMask) {
-            const cx = Math.floor(layer.mask.x * dpr);
-            const cy = Math.floor((height - layer.mask.y) * dpr);
-            const rad = Math.max(1, Math.floor(layer.mask.radius * dpr));
+            const mtx = (layer as any).maskTransform || {};
+            const cx = Math.floor(((layer.mask.x + (mtx.x || 0)) * dpr));
+            const cy = Math.floor(((height - (layer.mask.y + (mtx.y || 0))) * dpr));
+            const scaleR = ((mtx.scaleX || 1) + (mtx.scaleY || 1)) * 0.5;
+            const rad = Math.max(1, Math.floor(layer.mask.radius * scaleR * dpr));
 
             gl.useProgram(progTexMask);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
@@ -1458,6 +1509,13 @@ void main(){
             if (!mInfo) {
               void makeTextureFromImage(layer.mask.src);
             } else {
+              const mtx = (layer as any).maskTransform || {};
+              const sX = mtx.scaleX || 1.0;
+              const sY = mtx.scaleY || 1.0;
+              const offX = (mtx.x || 0) / w;
+              const offY = (mtx.y || 0) / h;
+              const rotRad = ((mtx.rotation || 0) * Math.PI) / 180.0;
+
               gl.useProgram(progTexImgMask);
               gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
               gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
@@ -1472,10 +1530,20 @@ void main(){
               gl.bindTexture(gl.TEXTURE_2D, mInfo.tex);
               gl.uniform1i(uSamplerMaskImgLoc, 1);
               gl.uniform1f(uAlphaTexImgMaskLoc, opacity);
+              gl.uniform2f(uMaskScaleTexImgLoc, sX, sY);
+              gl.uniform2f(uMaskOffsetTexImgLoc, offX, offY);
+              gl.uniform1f(uMaskRotTexImgLoc, rotRad);
               gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
             }
           } else if (isImageMask && layer.mask.type === "polygon" && Array.isArray(layer.mask.points)) {
             const maskTexInfo = makePolygonMaskTexture(w, h, layer.mask.points);
+            const mtx = (layer as any).maskTransform || {};
+            const sX = mtx.scaleX || 1.0;
+            const sY = mtx.scaleY || 1.0;
+            const offX = (mtx.x || 0) / w;
+            const offY = (mtx.y || 0) / h;
+            const rotRad = ((mtx.rotation || 0) * Math.PI) / 180.0;
+
             gl.useProgram(progTexImgMask);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
             gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
@@ -1490,6 +1558,9 @@ void main(){
             gl.bindTexture(gl.TEXTURE_2D, maskTexInfo.tex);
             gl.uniform1i(uSamplerMaskImgLoc, 1);
             gl.uniform1f(uAlphaTexImgMaskLoc, opacity);
+            gl.uniform2f(uMaskScaleTexImgLoc, sX, sY);
+            gl.uniform2f(uMaskOffsetTexImgLoc, offX, offY);
+            gl.uniform1f(uMaskRotTexImgLoc, rotRad);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
           } else {
             gl.useProgram(progTex);
