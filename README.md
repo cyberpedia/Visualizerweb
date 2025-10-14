@@ -68,9 +68,9 @@ Persistence and PWA
 
 ## Known limitations
 
-- Realtime export is WebM only and best-supported in Chrome/Edge; Safari/iOS should use Offline export (MP4/M4A).
+- Realtime export is WebM only and best-supported in Chrome/Edge; on Safari/iOS the app automatically falls back to Offline export (MP4/M4A).
 - Pixel format yuv444p with profile high444p has limited hardware decoder support on many devices; prefer yuv420p for broad compatibility.
-- WebGL blend modes support additive (“lighter”); multiply/screen are limited and implemented via shader passes only in some paths.
+- WebGL blend modes multiply and screen are implemented via shader compositing; most layer types are supported, but a few paths may still render with source-over where masks or effects are complex.
 - Streaming URL metadata/art can be blocked by CORS depending on the source.
 - Offline export with ffmpeg.wasm is CPU-intensive; using fewer parallel workers improves memory usage on low-end devices.
 
@@ -80,19 +80,19 @@ The following are planned or partially implemented:
 
 - Visual effects
   - Additional visualizer types and GPU variants (e.g., WebGL waveform/circle glow refinements)
-  - More advanced layers (masks, logos, particles with bursts and beat sync)
+  - More advanced layers (logos, particles with bursts and beat sync, richer masks and mask transforms)
   - SDF font atlas for faster high-quality text and kerning
 
 - Export and performance
   - WebCodecs decoding path for background video in workers (where supported)
   - Configurable bloom radius/iterations; selective bloom masks
   - Segment-based parallel encoding; improved memory via SharedArrayBuffer and OffscreenCanvas throughout
-  - Codec presets for streaming platforms, CRF/bitrate guidance, and auto profile/level selection
+  - Auto profile/level selection based on resolution/FPS and device guidance
 
 - DSP and playback
-  - High-quality pitch/time processing (phase vocoder/WSOLA improvements), BPM stabilization
-  - Reverb and additional effects
-  - Precomputed waveforms for long tracks with efficient IndexedDB lazy-loading
+  - Phase vocoder/WSOLA fidelity improvements; unify realtime/offline pitch/time where feasible
+  - Loudness normalization (EBU R128), limiter/compressor presets expansion
+  - Waveform caching and lazy-loading improvements for long tracks
 
 - UX and data
   - IndexedDB library/playlist persistence beyond localStorage
