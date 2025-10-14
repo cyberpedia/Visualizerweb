@@ -80,7 +80,7 @@ const LayerEditor: React.FC = () => {
   const setLayerLocked = usePlayerStore((s) => s.setLayerLocked);
   const moveLayerZIndex = usePlayerStore((s) => s.moveLayerZIndex);
 
-  const addKF = (id: string, prop: "x" | "y" | "opacity" | "size") => {
+  const addKF = (id: string, prop: "x" | "y" | "opacity" | "size" | "rotation") => {
     const time = audioEngine.getCurrentTime();
     const layer = (template.layers ?? []).find((l) => l.id === id);
     if (!layer) return;
@@ -88,6 +88,7 @@ const LayerEditor: React.FC = () => {
       prop === "x" ? layer.x :
       prop === "y" ? layer.y :
       prop === "opacity" ? layer.opacity :
+      prop === "rotation" ? (layer as any).rotation ?? 0 :
       (layer as any).size ?? 0;
 
     const nextKF = [...(layer.kf?.[prop] ?? []), { time, value: base, easing: "linear" }];
@@ -237,6 +238,61 @@ const LayerEditor: React.FC = () => {
                   type="number"
                   value={(layer as any).shadowBlur || 0}
                   onChange={(e) => updateLayer(layer.id, { shadowBlur: Number(e.target.value) } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+            </div>
+
+            {/* Filters */}
+            <div className="mt-2 grid grid-cols-5 gap-2">
+              <label className="text-xs">
+                Blur (px)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={(layer as any).filters?.blur ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { filters: { ...((layer as any).filters || {}), blur: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Hue (deg)
+                <input
+                  type="number"
+                  step={1}
+                  value={(layer as any).filters?.hue ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { filters: { ...((layer as any).filters || {}), hue: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Saturate
+                <input
+                  type="number"
+                  step={0.1}
+                  value={(layer as any).filters?.saturate ?? 1}
+                  onChange={(e) => updateLayer(layer.id, { filters: { ...((layer as any).filters || {}), saturate: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Brightness
+                <input
+                  type="number"
+                  step={0.1}
+                  value={(layer as any).filters?.brightness ?? 1}
+                  onChange={(e) => updateLayer(layer.id, { filters: { ...((layer as any).filters || {}), brightness: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Contrast
+                <input
+                  type="number"
+                  step={0.1}
+                  value={(layer as any).filters?.contrast ?? 1}
+                  onChange={(e) => updateLayer(layer.id, { filters: { ...((layer as any).filters || {}), contrast: Number(e.target.value) } } as any)}
                   className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                 />
               </label>
@@ -524,6 +580,57 @@ const LayerEditor: React.FC = () => {
               )}
             </div>
 
+            {/* Mask transform */}
+            <div className="mt-2 grid grid-cols-5 gap-2">
+              <label className="text-xs">
+                Mask X
+                <input
+                  type="number"
+                  value={(layer as any).maskTransform?.x ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { maskTransform: { ...((layer as any).maskTransform || {}), x: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Mask Y
+                <input
+                  type="number"
+                  value={(layer as any).maskTransform?.y ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { maskTransform: { ...((layer as any).maskTransform || {}), y: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Mask rotation (deg)
+                <input
+                  type="number"
+                  value={(layer as any).maskTransform?.rotation ?? 0}
+                  onChange={(e) => updateLayer(layer.id, { maskTransform: { ...((layer as any).maskTransform || {}), rotation: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Mask scale X
+                <input
+                  type="number"
+                  step={0.01}
+                  value={(layer as any).maskTransform?.scaleX ?? 1}
+                  onChange={(e) => updateLayer(layer.id, { maskTransform: { ...((layer as any).maskTransform || {}), scaleX: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs">
+                Mask scale Y
+                <input
+                  type="number"
+                  step={0.01}
+                  value={(layer as any).maskTransform?.scaleY ?? 1}
+                  onChange={(e) => updateLayer(layer.id, { maskTransform: { ...((layer as any).maskTransform || {}), scaleY: Number(e.target.value) } } as any)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                />
+              </label>
+            </div>
+
             {layer.type === "text" && (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 <label className="text-xs col-span-2">
@@ -746,6 +853,12 @@ const LayerEditor: React.FC = () => {
                     onChange={(e) => updateLayer(layer.id, { rotation: Number(e.target.value) } as any)}
                     className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
                   />
+                  <button
+                    className="mt-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700"
+                    onClick={() => addKF(layer.id, "rotation")}
+                  >
+                    + rotation keyframe
+                  </button>
                 </label>
                 <label className="text-xs">
                   Scale X

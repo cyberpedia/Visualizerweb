@@ -37,8 +37,14 @@ export type ArtistOverlay = {
   blendMode?: BlendModeBasic;
 };
 
-export type Easing = "linear" | "easeIn" | "easeOut" | "easeInOut";
-export type KeyframeNumber = { time: number; value: number; easing?: Easing };
+export type Easing = "linear" | "easeIn" | "easeOut" | "easeInOut" | "bezier";
+export type KeyframeNumber = {
+  time: number;
+  value: number;
+  easing?: Easing;
+  // cubic-bezier control points (used when easing === "bezier")
+  bezier?: { x1: number; y1: number; x2: number; y2: number };
+};
 
 export type Mask =
   | { type: "rect"; x: number; y: number; width: number; height: number }
@@ -65,6 +71,10 @@ export type BaseLayer = {
   shadowColor?: string;
   shadowBlur?: number;
   mask?: Mask; // optional per-layer mask
+  // optional transform applied to the mask path (Canvas2D/Offline)
+  maskTransform?: { x?: number; y?: number; rotation?: number; scaleX?: number; scaleY?: number };
+  // per-layer filters (Canvas2D/Offline)
+  filters?: { blur?: number; hue?: number; saturate?: number; brightness?: number; contrast?: number };
   reactive?: {
     target: "x" | "y" | "opacity" | "size";
     source: "beat";

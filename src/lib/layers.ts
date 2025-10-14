@@ -1,22 +1,29 @@
 import { Layer, KeyframeNumber, TemplateConfig, Mask } from "../state/store";
 
+function cubicBezierY(t: number, x1: number, y1: number, x2: number, y2: number): number {
+  const u = 1 - t;
+  return (3 * u * u * t * y1) + (3 * u * t * t * y2) + (t * t * t);
+}
+
 function interpKF(kf: KeyframeNumber[] | undefined, t: number, base: number): number {
   if (!kf || kf.length === 0) return base;
   const sorted = kf.slice().sort((a, b) => a.time - b.time);
   if (t <= sorted[0].time) return sorted[0].value;
   if (t >= sorted[sorted.length - 1].time) return sorted[sorted.length - 1].value;
-  // find segment
   for (let i = 0; i < sorted.length - 1; i++) {
     const a = sorted[i];
     const b = sorted[i + 1];
     if (t >= a.time && t <= b.time) {
       const tt = (t - a.time) / (b.time - a.time);
       const ease = a.easing ?? "linear";
-      const e =
+      let e =
         ease === "easeIn" ? tt * tt :
         ease === "easeOut" ? tt * (2 - tt) :
         ease === "easeInOut" ? (tt < 0.5 ? 2 * tt * tt : -1 + (4 - 2 * tt) * tt) :
         tt;
+      if (ease === "bezier" && a.bezier) {
+        e = cubicBezierY(tt, a.bezier.x1, a.bezier.y1, a.bezier.x2, a.bezier.y2);
+      }
       return a.value + (b.value - a.value) * e;
     }
   }
@@ -38,6 +45,16 @@ function applyCommon(ctx: CanvasRenderingContext2D, layer: any, x: number, y: nu
   ctx.globalCompositeOperation = layer.blendMode || "source-over";
   ctx.shadowBlur = layer.shadowBlur || 0;
   ctx.shadowColor = layer.shadowColor || "transparent";
+  // Canvas2D filters
+  const f = layer.filters || {};
+  const parts: string[] = [];
+  if (typeof f.blur === "number" && f.blur > 0) parts.push(`blur(${f.blur}px)`);
+  if (typeof f.hue === "number" && f.hue !== 0) parts.push(`hue-rotate(${f.hue}deg)`);
+  if (typeof f.saturate === "number" && f.saturate > 0 && f.saturate !== 1) parts.push(`saturate(${f.saturate})`);
+  if (typeof f.brightness === "number" && f.brightness > 0 && f.brightness !== 1) parts.push(`brightness(${f.brightness})`);
+  if (typeof f.contrast === "number" && f.contrast > 0 && f.contrast !== 1) parts.push(`contrast(${f.contrast})`);
+  (ctx as any).filter = parts.length ? parts.join(" ") : "none";
+
   const rot = (layer.rotation || 0) * Math.PI / 180;
   const sx = layer.scaleX ?? 1;
   const sy = layer.scaleY ?? 1;
@@ -49,18 +66,34 @@ function applyCommon(ctx: CanvasRenderingContext2D, layer: any, x: number, y: nu
   ctx.translate(-(x + ax), -(y + ay));
 }
 
-function applyMask(ctx: CanvasRenderingContext2D, mask?: Mask) {
+function applyMask(
+  ctx: CanvasRenderingContext2D,
+  mask?: Mask,
+  maskTransform?: { x?: number; y?: number; rotation?: number; scaleX?: number; scaleY?: number }
+) {
   if (!mask) return;
   if (mask.type === "image") {
     // handled separately via destination-in compositing after drawing
     return;
   }
   ctx.save();
+  if (maskTransform) {
+    const mx = maskTransform.x ?? 0;
+    const my = maskTransform.y ?? 0;
+    const mr = (maskTransform.rotation ?? 0) * Math.PI / 180;
+    const msx = maskTransform.scaleX ?? 1;
+    const msy = maskTransform.scaleY ?? 1;
+    ctx.translate(mx, my);
+    if (mr) ctx.rotate(mr);
+    if (msx !== 1 || msy !== 1) ctx.scale(msx, msy);
+  }
   ctx.beginPath();
-  if (mask.type === "rect") {
-    ctx.rect(mask.x, mask.y, mask.width, mask.height);
-  } else if (mask.type === "circle") {
-    ctx.arc(mask.x, mask.y, mask.radius, 0, Math.PI * 2);
+  if ((mask as any).type === "rect") {
+    const m = mask as any;
+    ctx.rect(m.x, m.y, m.width, m.height);
+  } else if ((mask as any).type === "circle") {
+    const m = mask as any;
+    ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
   } else if ((mask as any).type === "polygon" && Array.isArray((mask as any).points) && (mask as any).points.length) {
     const pts = (mask as any).points as Array<{ x: number; y: number }>;
     ctx.moveTo(pts[0].x, pts[0].y);
@@ -108,10 +141,10 @@ function drawText(
   ctx.save();
   ctx.globalAlpha = opacity;
   applyCommon(ctx, layer, x, y);
-  applyMask(ctx, layer.mask);
+  applyMask(ctx, layer.mask, layer.maskTransform);
   ctx.fillStyle = layer.color;
   ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
-  ctx.textAlign = layer.align;
+  ctx.textAlign = layer.align as CanvasTextAlign;
   if (layer.strokeColor && layer.strokeWidth) {
     ctx.lineWidth = layer.strokeWidth;
     ctx.strokeStyle = layer.strokeColor;
@@ -119,7 +152,6 @@ function drawText(
   }
   ctx.fillText(layer.text, x, y);
   endMask(ctx, layer.mask);
-  // apply image mask after drawing if requested
   const w = Math.ceil(ctx.measureText(layer.text).width);
   const h = Math.ceil(size * 1.3);
   applyImageMask(ctx, layer.mask, x, y - size * 0.05, w, h);
@@ -155,11 +187,10 @@ function drawImage(
     ctx.closePath();
     ctx.clip();
   } else {
-    applyMask(ctx, layer.mask);
+    applyMask(ctx, layer.mask, layer.maskTransform);
   }
   ctx.drawImage(img, x, y, w, h);
   endMask(ctx, layer.mask);
-  // apply image mask after drawing if requested
   applyImageMask(ctx, layer.mask, x, y, w, h);
   ctx.restore();
 }
@@ -180,7 +211,7 @@ function drawShape(
   ctx.save();
   ctx.globalAlpha = opacity;
   applyCommon(ctx, layer, x, y);
-  applyMask(ctx, layer.mask);
+  applyMask(ctx, layer.mask, layer.maskTransform);
   let wRect = 100, hRect = 50;
   if (layer.shape === "rect") {
     const w = layer.width ?? 100;
@@ -220,7 +251,6 @@ function drawShape(
     }
   }
   endMask(ctx, layer.mask);
-  // apply image mask after drawing if requested
   applyImageMask(ctx, layer.mask, x, y, wRect, hRect);
   ctx.restore();
 }
@@ -259,7 +289,7 @@ function drawProgressRing(
 
   ctx.save();
   ctx.globalAlpha = opacity;
-  applyMask(ctx, layer.mask);
+  applyMask(ctx, layer.mask, layer.maskTransform);
   ctx.lineWidth = thick;
   ctx.strokeStyle = lerpColor(layer.color1, layer.color2, t);
   ctx.beginPath();
@@ -292,7 +322,7 @@ function drawParticles(
 
   ctx.save();
   ctx.globalAlpha = layer.opacity;
-  applyMask(ctx, layer.mask);
+  applyMask(ctx, layer.mask, layer.maskTransform);
   ctx.fillStyle = layer.color;
   const speed = layer.speed * (1 + 0.5 * (beatPulse || 0));
   for (const p of parts) {
@@ -325,7 +355,7 @@ function renderGroup(
   ctx.save();
   ctx.globalAlpha = opacity;
   applyCommon(ctx, group, x, y);
-  applyMask(ctx, group.mask);
+  applyMask(ctx, group.mask, group.maskTransform);
 
   const children = (template.layers ?? [])
     .filter((l) => (l as any).parentId === group.id)
@@ -400,77 +430,5 @@ export function drawLayers(
 // simple particles cache per invocation
 const particlesCache = new WeakMap<Layer, { x: number; y: number }[]>();
 
-function drawParticles(
-  ctx: CanvasRenderingContext2D,
-  layer: any,
-  width: number,
-  height: number,
-  beatPulse: number,
-  template: TemplateConfig,
-  time: number
-) {
-  let parts = particlesCache.get(layer);
-  if (!parts) {
-    parts = Array.from({ length: layer.count }, () => ({
-      x: Math.random() * width,
-      y: Math.random() * height
-    }));
-    particlesCache.set(layer, parts);
-  }
 
-  ctx.save();
-  const chain = beginGroupHierarchy(ctx, template, layer, time);
-  ctx.globalAlpha = layer.opacity;
-  applyMask(ctx, layer.mask);
-  ctx.fillStyle = layer.color;
-  const speed = layer.speed * (1 + 0.5 * (beatPulse || 0));
-  for (const p of parts) {
-    p.y -= speed;
-    if (p.y < -10) p.y = height + 10;
-    const s = layer.size * (1 + 0.3 * (beatPulse || 0));
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  endMask(ctx, layer.mask);
-  // image mask across full canvas if specified
-  applyImageMask(ctx, layer.mask, 0, 0, width, height);
-  endGroupHierarchy(ctx, chain);
-  ctx.restore();
-}
 
-export function drawLayers(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  template: TemplateConfig,
-  time: number,
-  duration: number,
-  beatPulse: number
-) {
-  const layers = (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex);
-  for (const layer of layers) {
-    if (!layer.visible) continue;
-    if ((layer as any).type === "group") {
-      // groups are containers; skip direct drawing
-      continue;
-    }
-    switch (layer.type) {
-      case "text":
-        drawText(ctx, layer, time, template);
-        break;
-      case "image":
-        drawImage(ctx, layer, time, template);
-        break;
-      case "shape":
-        drawShape(ctx, layer, time, template);
-        break;
-      case "progressRing":
-        drawProgressRing(ctx, layer, time, duration, template);
-        break;
-      case "particles":
-        drawParticles(ctx, layer, width, height, beatPulse, template, time);
-        break;
-    }
-  }
-}

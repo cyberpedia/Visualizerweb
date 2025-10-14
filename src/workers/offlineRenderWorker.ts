@@ -198,6 +198,10 @@ function drawWorkerOverlays(
   }
 }
 
+function cubicBezierY(t: number, x1: number, y1: number, x2: number, y2: number): number {
+  const u = 1 - t;
+  return (3 * u * u * t * y1) + (3 * u * t * t * y2) + (t * t * t);
+}
 function interpKF(kf: any[] | undefined, t: number, base: number): number {
   if (!kf || kf.length === 0) return base;
   const sorted = kf.slice().sort((a: any, b: any) => a.time - b.time);
@@ -209,11 +213,14 @@ function interpKF(kf: any[] | undefined, t: number, base: number): number {
     if (t >= a.time && t <= b.time) {
       const tt = (t - a.time) / (b.time - a.time);
       const ease = a.easing ?? "linear";
-      const e =
+      let e =
         ease === "easeIn" ? tt * tt :
         ease === "easeOut" ? tt * (2 - tt) :
         ease === "easeInOut" ? (tt < 0.5 ? 2 * tt * tt : -1 + (4 - 2 * tt) * tt) :
         tt;
+      if (ease === "bezier" && a.bezier) {
+        e = cubicBezierY(tt, a.bezier.x1, a.bezier.y1, a.bezier.x2, a.bezier.y2);
+      }
       return a.value + (b.value - a.value) * e;
     }
   }
@@ -245,6 +252,16 @@ function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: numb
   ctx.globalCompositeOperation = (layer.blendMode as any) || "source-over";
   (ctx as any).shadowBlur = layer.shadowBlur || 0;
   (ctx as any).shadowColor = layer.shadowColor || "transparent";
+  // Canvas2D filters (offscreen)
+  const f = layer.filters || {};
+  const parts: string[] = [];
+  if (typeof f.blur === "number" && f.blur > 0) parts.push(`blur(${f.blur}px)`);
+  if (typeof f.hue === "number" && f.hue !== 0) parts.push(`hue-rotate(${f.hue}deg)`);
+  if (typeof f.saturate === "number" && f.saturate > 0 && f.saturate !== 1) parts.push(`saturate(${f.saturate})`);
+  if (typeof f.brightness === "number" && f.brightness > 0 && f.brightness !== 1) parts.push(`brightness(${f.brightness})`);
+  if (typeof f.contrast === "number" && f.contrast > 0 && f.contrast !== 1) parts.push(`contrast(${f.contrast})`);
+  (ctx as any).filter = parts.length ? parts.join(" ") : "none";
+
   const rot = (layer.rotation || 0) * Math.PI / 180;
   const sx = layer.scaleX ?? 1;
   const sy = layer.scaleY ?? 1;
@@ -256,9 +273,23 @@ function applyCommon(ctx: OffscreenCanvasRenderingContext2D, layer: any, x: numb
   ctx.translate(-(x + ax), -(y + ay));
 }
 
-function applyMask(ctx: OffscreenCanvasRenderingContext2D, mask?: any) {
+function applyMask(
+  ctx: OffscreenCanvasRenderingContext2D,
+  mask?: any,
+  maskTransform?: { x?: number; y?: number; rotation?: number; scaleX?: number; scaleY?: number }
+) {
   if (!mask) return;
   ctx.save();
+  if (maskTransform) {
+    const mx = maskTransform.x ?? 0;
+    const my = maskTransform.y ?? 0;
+    const mr = (maskTransform.rotation ?? 0) * Math.PI / 180;
+    const msx = maskTransform.scaleX ?? 1;
+    const msy = maskTransform.scaleY ?? 1;
+    ctx.translate(mx, my);
+    if (mr) ctx.rotate(mr);
+    if (msx !== 1 || msy !== 1) ctx.scale(msx, msy);
+  }
   ctx.beginPath();
   if (mask.type === "rect") {
     ctx.rect(mask.x, mask.y, mask.width, mask.height);
@@ -300,7 +331,7 @@ function beginGroupHierarchy(ctx: OffscreenCanvasRenderingContext2D, template: T
     const gx = interpKF(g.kf?.x, time, g.x);
     const gy = interpKF(g.kf?.y, time, g.y);
     applyCommon(ctx, g, gx, gy);
-    applyMask(ctx, g.mask);
+    applyMask(ctx, g.mask, g.maskTransform);
   }
   return chain;
 }
@@ -359,7 +390,7 @@ async function drawWorkerLayers(
         const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
-        applyMask(ctx, l.mask);
+        applyMask(ctx, l.mask, l.maskTransform);
         ctx.fillStyle = l.color;
         ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto`;
         ctx.textAlign = l.align as CanvasTextAlign;
@@ -408,7 +439,7 @@ async function drawWorkerLayers(
           ctx.closePath();
           ctx.clip();
         } else {
-          applyMask(ctx, l.mask);
+          applyMask(ctx, l.mask, l.maskTransform);
         }
         ctx.drawImage(bmp, x, y, w, h);
         endMask(ctx, l.mask);
@@ -437,7 +468,7 @@ async function drawWorkerLayers(
         const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
-        applyMask(ctx, l.mask);
+        applyMask(ctx, l.mask, l.maskTransform);
         let wRect = 100, hRect = 50;
         if (l.shape === "rect") {
           const w = l.width ?? 100;
@@ -506,7 +537,7 @@ async function drawWorkerLayers(
         const chain = insideGroup ? [] : beginGroupHierarchy(ctx, template, l, time);
         ctx.globalAlpha = opacity;
         applyCommon(ctx, l, x, y);
-        applyMask(ctx, l.mask);
+        applyMask(ctx, l.mask, l.maskTransform);
         (ctx as any).lineWidth = thick;
         (ctx as any).strokeStyle = lerpColor(l.color1, l.color2, t);
         ctx.beginPath();

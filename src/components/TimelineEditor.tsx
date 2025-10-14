@@ -21,6 +21,7 @@ const TimelineEditor: React.FC = () => {
   const [layerId, setLayerId] = useState<string>("");
   const [prop, setProp] = useState<PropKey>("x");
   const [zoom, setZoom] = useState<number>(1);
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
 
   const layers = useMemo(() => (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex), [template.layers]);
   const selected = layers.find((l) => l.id === layerId) as any;
@@ -183,6 +184,17 @@ const TimelineEditor: React.FC = () => {
             nextKf[prop] = list;
             updateLayer(selected.id, { kf: nextKf });
           }}
+          onMouseMove={(e) => {
+            if (draggingIdx == null) return;
+            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const w = rect.width;
+            const dur = isFinite(duration) && duration > 0 ? duration : 60;
+            const t = snapTime(Math.max(0, Math.min(dur, (x / w) * dur / zoom)));
+            updateKeyframe(draggingIdx, { time: t });
+          }}
+          onMouseUp={() => setDraggingIdx(null)}
+          onMouseLeave={() => setDraggingIdx(null)}
           title="Click to add keyframe at position"
         >
           {/* grid lines */}
@@ -208,12 +220,13 @@ const TimelineEditor: React.FC = () => {
             .sort((a: any, b: any) => a.time - b.time)
             .map((k: any, i: number) => (
               <div key={i}
-                className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-pointer"
+                className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-ew-resize"
                 style={{
                   left: `${(Math.min(1, k.time / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`,
                   top: "50%"
                 }}
                 title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
+                onMouseDown={() => setDraggingIdx(i)}
               />
             ))}
         </div>
@@ -262,8 +275,61 @@ const TimelineEditor: React.FC = () => {
                       <option value="easeIn">easeIn</option>
                       <option value="easeOut">easeOut</option>
                       <option value="easeInOut">easeInOut</option>
+                      <option value="bezier">bezier</option>
                     </select>
                   </label>
+                  {k.easing === "bezier" && (
+                    <div className="col-span-2 grid grid-cols-4 gap-2">
+                      <label className="text-xs">
+                        x1
+                        <input
+                          type="number"
+                          step={0.01}
+                          min={0}
+                          max={1}
+                          value={k.bezier?.x1 ?? 0.25}
+                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: Number(e.target.value), y1: k.bezier?.y1 ?? 0.1, x2: k.bezier?.x2 ?? 0.25, y2: k.bezier?.y2 ?? 1 } } as any)}
+                          className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                        />
+                      </label>
+                      <label className="text-xs">
+                        y1
+                        <input
+                          type="number"
+                          step={0.01}
+                          min={0}
+                          max={1}
+                          value={k.bezier?.y1 ?? 0.1}
+                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: Number(e.target.value), x2: k.bezier?.x2 ?? 0.25, y2: k.bezier?.y2 ?? 1 } } as any)}
+                          className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                        />
+                      </label>
+                      <label className="text-xs">
+                        x2
+                        <input
+                          type="number"
+                          step={0.01}
+                          min={0}
+                          max={1}
+                          value={k.bezier?.x2 ?? 0.25}
+                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: k.bezier?.y1 ?? 0.1, x2: Number(e.target.value), y2: k.bezier?.y2 ?? 1 } } as any)}
+                          className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                        />
+                      </label>
+                      <label className="text-xs">
+                        y2
+                        <input
+                          type="number"
+                          step={0.01}
+                          min={0}
+                          max={1}
+                          value={k.bezier?.y2 ?? 1}
+                          onChange={(e) => updateKeyframe(i, { easing: "bezier", ...(k.bezier || {}), bezier: { x1: k.bezier?.x1 ?? 0.25, y1: k.bezier?.y1 ?? 0.1, x2: k.bezier?.x2 ?? 0.25, y2: Number(e.target.value) } } as any)}
+                          className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1 text-xs"
+                        />
+                      </label>
+                    </div>
+                  )}
                   <div className="text-[11px] text-gray-400 self-end">
                     t={k.time.toFixed(2)}s, v={k.value}
                   </div>
