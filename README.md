@@ -40,7 +40,9 @@ Visualizers and overlays
 - Overlays: album art, title, and artist text (blend modes: source-over, lighter/add, multiply, screen)
 - Advanced template layers: text, image, shape, progress ring, particles
 - Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle/image/polygon) on Canvas/Offline paths; WebGL path supports additive and shader-based multiply/screen for overlays and layers with rect/circle/image masks (polygon masks for text/image via rasterized mask textures)
-- Keyframe timeline for animatable properties (x, y, opacity, size, rotation)
+- WebGL per-layer filters (initial support for text layers; image support coming next): blur, hue-rotate, saturate, brightness, contrast. Filters are applied as offscreen passes and composited with the chosen blend mode.
+- Circle mask transform (WebGL): translation and scaling on mask center/radius for text/image layers; rect mask supports translation/scale via scissor.
+- Keyframe timeline for animatable properties (x, y, opacity, size, rotation) with zoom, markers, click-to-add, and optional bezier easing per keyframe
 - Template Gallery with defaults, user presets; template import/export (JSON)
 - Editor grid overlay with configurable grid size (for alignment)
 

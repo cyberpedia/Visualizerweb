@@ -357,6 +357,78 @@ void main(){
 }
 `;
 
+// Layer color filter shader (hue/saturate/brightness/contrast)
+const FS_FILTER = `
+precision mediump float;
+varying vec2 vTex;
+uniform sampler2D uTex;
+uniform float uHue;        // degrees
+uniform float uSaturate;   // 1.0 = no change
+uniform float uBrightness; // 1.0 = no change
+uniform float uContrast;   // 1.0 = no change
+
+vec3 rgb2hsv(vec3 c) {
+  float cmax = max(max(c.r, c.g), c.b);
+  float cmin = min(min(c.r, c.g), c.b);
+  float diff = cmax - cmin;
+  float h = 0.0;
+  if (diff > 1e-6) {
+    if (cmax == c.r) {
+      h = mod((c.g - c.b) / diff, 6.0);
+    } else if (cmax == c.g) {
+      h = ((c.b - c.r) / diff) + 2.0;
+    } else {
+      h = ((c.r - c.g) / diff) + 4.0;
+    }
+    h /= 6.0;
+    if (h < 0.0) h += 1.0;
+  }
+  float s = cmax <= 0.0 ? 0.0 : diff / cmax;
+  float v = cmax;
+  return vec3(h, s, v);
+}
+
+vec3 hsv2rgb(vec3 h) {
+  float C = h.z * h.y;
+  float hh = h.x * 6.0;
+  float X = C * (1.0 - abs(mod(hh, 2.0) - 1.0));
+  vec3 rgb;
+  if      (hh < 1.0) rgb = vec3(C, X, 0.0);
+  else if (hh < 2.0) rgb = vec3(X, C, 0.0);
+  else if (hh < 3.0) rgb = vec3(0.0, C, X);
+  else if (hh < 4.0) rgb = vec3(0.0, X, C);
+  else if (hh < 5.0) rgb = vec3(X, 0.0, C);
+  else               rgb = vec3(C, 0.0, X);
+  float m = h.z - C;
+  return rgb + vec3(m);
+}
+
+void main(){
+  vec4 c4 = texture2D(uTex, vTex);
+  vec3 c = c4.rgb;
+
+  // brightness
+  c *= uBrightness;
+
+  // contrast around 0.5
+  c = (c - 0.5) * uContrast + 0.5;
+
+  // saturation
+  float g = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(g), c, uSaturate);
+
+  // hue rotate via HSV
+  float hDeg = uHue;
+  if (abs(hDeg) > 0.001) {
+    vec3 hsv = rgb2hsv(c);
+    hsv.x = fract(hsv.x + (hDeg / 360.0));
+    c = hsv2rgb(hsv);
+  }
+
+  gl_FragColor = vec4(c, c4.a);
+}
+`;
+
 // Layer compositing shader: source-over, multiply, screen
 const FS_LAYER_COMPOSITE = `
 precision mediump float;
@@ -386,6 +458,7 @@ void main(){
     const progBlur = createProgram(gl, VS_QUAD, FS_BLUR);
     const progComposite = createProgram(gl, VS_QUAD, FS_COMPOSITE);
     const progLayerComposite = createProgram(gl, VS_QUAD, FS_LAYER_COMPOSITE);
+    const progFilter = createProgram(gl, VS_QUAD, FS_FILTER);
 
     const aIndexLoc = gl.getAttribLocation(progPoints, "aIndex");
     const uCountLoc = gl.getUniformLocation(progPoints, "uCount");
@@ -451,13 +524,21 @@ void main(){
     const uTexBlurLoc = gl.getUniformLocation(progBlur, "uTex");
     const uTexelLoc = gl.getUniformLocation(progBlur, "uTexel");
 
+    // Filter locations
+    const aPosFiltLoc = gl.getAttribLocation(progFilter, "aPos");
+    const aTexFiltLoc = gl.getAttribLocation(progFilter, "aTex");
+    const uTexFilterLoc = gl.getUniformLocation(progFilter, "uTex");
+    const uHueLoc = gl.getUniformLocation(progFilter, "uHue");
+    const uSatLoc = gl.getUniformLocation(progFilter, "uSaturate");
+    const uBrightLoc = gl.getUniformLocation(progFilter, "uBrightness");
+    const uContrastLoc = gl.getUniformLocation(progFilter, "uContrast");
+    
     const aPosCompLoc = gl.getAttribLocation(progComposite, "aPos");
     const aTexCompLoc = gl.getAttribLocation(progComposite, "aTex");
     const uSceneLoc = gl.getUniformLocation(progComposite, "uScene");
     const uBloomLoc = gl.getUniformLocation(progComposite, "uBloom");
-    const uIntensityLoc = gl.getUniformLocation(progComposite, "uIntensity");
-
-    // Layer composite locations
+    const uIntensityLoc = gl.getUniformLocation(progComposite, "uIntensit_codey"new)</;
+   // Layer composite locations
     const aPosLCLoc = gl.getAttribLocation(progLayerComposite, "aPos");
     const aTexLCLoc = gl.getAttribLocation(progLayerComposite, "aTex");
     const uSceneLCLoc = gl.getUniformLocation(progLayerComposite, "uScene");
@@ -687,15 +768,27 @@ void main(){
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     // Helper: apply rect mask via scissor in framebuffer pixel space
-    const applyRectMask = (mask: any | undefined, dpr: number) => {
+    const applyRectMask = (mask: any | undefined, dpr: number, maskTransform?: any) => {
       if (!mask || mask.type !== "rect") return false;
-      const x = Math.floor(mask.x * dpr);
-      const y = Math.floor(mask.y * dpr);
-      const w = Math.floor(mask.width * dpr);
-      const h = Math.floor(mask.height * dpr);
+      let x = mask.x;
+      let y = mask.y;
+      let w = mask.width;
+      let h = mask.height;
+      if (maskTransform) {
+        x += maskTransform.x || 0;
+        y += maskTransform.y || 0;
+        const sx = maskTransform.scaleX || 1;
+        const sy = maskTransform.scaleY || 1;
+        w = w * sx;
+        h = h * sy;
+        // rotation not supported for scissor; ignored
+      }
+      const sxPx = Math.floor(x * dpr);
+      const syPx = Math.floor(y * dpr);
+      const wPx = Math.floor(w * dpr);
+      const hPx = Math.floor(h * dpr);
       gl.enable(gl.SCISSOR_TEST);
-      // gl_FragCoord/scissor origin bottom-left: convert from top-left UI coords
-      gl.scissor(x, canvas.height - (y + h), w, h);
+      gl.scissor(sxPx, canvas.height - (syPx + hPx), wPx, hPx);
       return true;
     };
     const endMask = () => {
@@ -1136,20 +1229,33 @@ void main(){
           const col = hexToRGB(layer.color || "#ffffff");
           const isCircleMask = layer.mask && layer.mask.type === "circle";
           const isImageMask = layer.mask && layer.mask.type === "image";
-          const appliedRect = applyRectMask(layer.mask, dpr);
+          const appliedRect = applyRectMask(layer.mask, dpr, layer.maskTransform);
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
 
+          // Filters
+          const filters = (layer as any).filters || {};
+          const blurPx = Math.max(0.0, filters.blur || 0.0);
+          const hueDeg = filters.hue || 0.0;
+          const sat = filters.saturate !== undefined ? filters.saturate : 1.0;
+          const bright = filters.brightness !== undefined ? filters.brightness : 1.0;
+          const contr = filters.contrast !== undefined ? filters.contrast : 1.0;
+          const hasColorAdjust = Math.abs(hueDeg) > 0.001 || Math.abs(sat - 1.0) > 0.001 || Math.abs(bright - 1.0) > 0.001 || Math.abs(contr - 1.0) > 0.001;
+          const hasFilters = (blurPx > 0.0) || hasColorAdjust;
+          const needsOffscreen = specialBlend || hasFilters;
+
           // Choose target framebuffer
-          if (specialBlend) {
+          if (needsOffscreen) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
           }
 
           if (isCircleMask) {
-            const cx = Math.floor(layer.mask.x * dpr);
-            const cy = Math.floor((height - layer.mask.y) * dpr); // convert top-left to bottom-left origin
-            const rad = Math.max(1, Math.floor(layer.mask.radius * dpr));
+            const mtx = (layer as any).maskTransform || {};
+            const cx = Math.floor(((layer.mask.x + (mtx.x || 0)) * dpr));
+            const cy = Math.floor(((height - (layer.mask.y + (mtx.y || 0))) * dpr)); // convert top-left to bottom-left origin
+            const scaleR = ((mtx.scaleX || 1) + (mtx.scaleY || 1)) * 0.5;
+            const rad = Math.max(1, Math.floor(layer.mask.radius * scaleR * dpr));
 
             gl.useProgram(progSDFMask);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufTex);
@@ -1215,7 +1321,7 @@ void main(){
             gl.enableVertexAttribArray(aTexSDFLoc);
             gl.vertexAttribPointer(aTexSDFLoc, 2, gl.FLOAT, false, 16, 8);
             gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, tex.tex);
+            gl.bindTexture(gl.TEXTURE_2D, t.tex);
             gl.uniform1i(uSamplerSDFLoc, 0);
             gl.uniform3f(uTextColorLoc, col[0], col[1], col[2]);
             gl.uniform1f(uAlphaSDFLoc, opacity);
@@ -1223,8 +1329,61 @@ void main(){
           }
           if (appliedRect) endMask();
 
-          if (specialBlend) {
-            // composite layer texture over scene according to mode
+          if (needsOffscreen) {
+            // Optionally blur
+            let currentTex: WebGLTexture = texLayer!;
+            if (blurPx > 0.0) {
+              // horizontal blur: layer -> ping
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboPing);
+              gl.useProgram(progBlur);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosQuadLoc);
+              gl.vertexAttribPointer(aPosQuadLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexQuadLoc);
+              gl.vertexAttribPointer(aTexQuadLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uTexBlurLoc, 0);
+              gl.uniform2f(uTexelLoc, blurPx / canvas.width, 0.0);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+              // vertical blur: ping -> pong
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboPong);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, texPing!);
+              gl.uniform1i(uTexBlurLoc, 0);
+              gl.uniform2f(uTexelLoc, 0.0, blurPx / canvas.height);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              currentTex = texPong!;
+            }
+
+            // Color adjustments
+            if (hasColorAdjust) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+              gl.useProgram(progFilter);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosFiltLoc);
+              gl.vertexAttribPointer(aPosFiltLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexFiltLoc);
+              gl.vertexAttribPointer(aTexFiltLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uTexFilterLoc, 0);
+              gl.uniform1f(uHueLoc, hueDeg);
+              gl.uniform1f(uSatLoc, sat);
+              gl.uniform1f(uBrightLoc, bright);
+              gl.uniform1f(uContrastLoc, contr);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              // swap scratch into layer
+              const tTmp2 = texLayer; texLayer = texScratch; texScratch = tTmp2;
+              const fTmp2 = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2;
+              currentTex = texLayer!;
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+            }
+
+            // Composite to scene: special blend or source-over
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
             gl.useProgram(progLayerComposite);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
@@ -1237,16 +1396,13 @@ void main(){
             gl.bindTexture(gl.TEXTURE_2D, texScene!);
             gl.uniform1i(uSceneLCLoc, 0);
             gl.activeTexture(gl.TEXTURE1);
-            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.bindTexture(gl.TEXTURE_2D, currentTex);
             gl.uniform1i(uLayerLCLoc, 1);
-            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.uniform1i(uModeLCLoc, specialBlend ? (layer.blendMode === "multiply" ? 1 : 2) : 0);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
 
-            // swap scratch into scene
             const tTmp = texScene; texScene = texScratch; texScratch = tTmp;
             const fTmp = fboScene; fboScene = fboScratch; fboScratch = fTmp;
-
-            // continue rendering to scene
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
           }
         } else if (layer.type === "image") {
@@ -1270,7 +1426,7 @@ void main(){
 
           const isCircleMask = layer.mask && layer.mask.type === "circle";
           const isImageMask = layer.mask && layer.mask.type === "image";
-          const appliedRect = applyRectMask(layer.mask, dpr);
+          const appliedRect = applyRectMask(layer.mask, dpr, layer.maskTransform);
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
           if (specialBlend) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
@@ -1377,7 +1533,7 @@ void main(){
           const x = interpKF(layer.kf?.x, tSec, layer.x);
           const y = interpKF(layer.kf?.y, tSec, layer.y);
           const opacity = interpKF(layer.kf?.opacity, tSec, layer.opacity);
-          const appliedRect = applyRectMask(layer.mask, dpr);
+          const appliedRect = applyRectMask(layer.mask, dpr, layer.maskTransform);
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
           if (specialBlend) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
