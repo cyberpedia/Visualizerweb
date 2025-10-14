@@ -55,7 +55,14 @@ const TimelineEditor: React.FC = () => {
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [draggingProp, setDraggingProp] = useState<PropKey | null>(null);
   const [activeKF, setActiveKF] = useState<{ prop: PropKey; index: number } | null>(null);
-  const [clipboardKF, setClipboardKF] = useState<{ prop: PropKey; kf: any } | null>(null);
+  const [selectedKFs, setSelectedKFs] = useState<Array<{ prop: PropKey; index: number }>>([]);
+  const [clipboardKFs, setClipboardKFs] = useState<Array<{ prop: PropKey; kf: any }>>([]);
+  const [groupDrag, setGroupDrag] = useState<{
+    prop: PropKey | null;
+    startX: number;
+    startTimes: Array<{ prop: PropKey; index: number; time: number }>;
+  } | null>(null);
+  const [bezierDrag, setBezierDrag] = useState<"p1" | "p2" | null>(null);
 
   const layers = useMemo(() => (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex), [template.layers]);
   const selected = layers.find((l) => l.id === layerId) as any;
@@ -120,27 +127,77 @@ const TimelineEditor: React.FC = () => {
         tabIndex={0}
         onKeyDown={(e) => {
           if (!selected) return;
+          const dur = isFinite(duration) && duration > 0 ? duration : 60;
+
+          // Delete removes active keyframe or all selected keyframes
           if (e.key === "Delete" || e.key === "Backspace") {
-            if (activeKF) {
+            if (selectedKFs.length > 0) {
+              const nextKf = { ...(selected.kf || {}) } as any;
+              for (const sel of selectedKFs) {
+                const arr = (nextKf[sel.prop] || []).slice();
+                arr.splice(sel.index, 1);
+                nextKf[sel.prop] = arr;
+              }
+              updateLayer(selected.id, { kf: nextKf });
+              setSelectedKFs([]);
+              setActiveKF(null);
+              e.preventDefault();
+            } else if (activeKF) {
               removeKeyframeFor(activeKF.prop, activeKF.index);
+              setActiveKF(null);
               e.preventDefault();
             }
-          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-            if (activeKF) {
+          }
+
+          // Copy selected keyframes
+          else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+            const toCopy: Array<{ prop: PropKey; kf: any }> = [];
+            if (selectedKFs.length > 0) {
+              for (const sel of selectedKFs) {
+                const arr = ((selected.kf?.[sel.prop] as any[]) || []).slice();
+                const cur = arr[sel.index];
+                if (cur) toCopy.push({ prop: sel.prop, kf: { ...cur } });
+              }
+            } else if (activeKF) {
               const arr = ((selected.kf?.[activeKF.prop] as any[]) || []).slice();
               const cur = arr[activeKF.index];
-              if (cur) {
-                setClipboardKF({ prop: activeKF.prop, kf: { ...cur } });
-              }
+              if (cur) toCopy.push({ prop: activeKF.prop, kf: { ...cur } });
+            }
+            if (toCopy.length > 0) {
+              setClipboardKFs(toCopy);
               e.preventDefault();
             }
-          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-            if (clipboardKF) {
+          }
+
+          // Paste at current time for each copied keyframe (same property lanes)
+          else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+            if (clipboardKFs.length > 0) {
               const nextKf = { ...(selected.kf || {}) } as any;
-              const list = Array.isArray(nextKf[clipboardKF.prop]) ? nextKf[clipboardKF.prop].slice() : [];
-              const t = snapTime(audioEngine.getCurrentTime());
-              list.push({ ...clipboardKF.kf, time: t });
-              nextKf[clipboardKF.prop] = list;
+              const tPaste = snapTime(audioEngine.getCurrentTime());
+              for (const item of clipboardKFs) {
+                const list = Array.isArray(nextKf[item.prop]) ? nextKf[item.prop].slice() : [];
+                list.push({ ...item.kf, time: tPaste });
+                nextKf[item.prop] = list;
+              }
+              updateLayer(selected.id, { kf: nextKf });
+              e.preventDefault();
+            }
+          }
+
+          // Nudge left/right for selected or active keyframe(s)
+          else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            const delta = (e.shiftKey ? snapStep : snapStep * 0.25) * (e.key === "ArrowLeft" ? -1 : 1);
+            const nextKf = { ...(selected.kf || {}) } as any;
+            const targets = selectedKFs.length > 0 ? selectedKFs : (activeKF ? [activeKF] : []);
+            for (const t of targets as any[]) {
+              const arr = (nextKf[t.prop] || []).slice();
+              if (arr[t.index]) {
+                const nt = Math.max(0, Math.min(dur, (arr[t.index].time ?? 0) + delta));
+                arr[t.index] = { ...arr[t.index], time: snapEnabled ? Math.round(nt / snapStep) * snapStep : nt };
+                nextKf[t.prop] = arr;
+              }
+            }
+            if (targets.length > 0) {
               updateLayer(selected.id, { kf: nextKf });
               e.preventDefault();
             }
@@ -341,10 +398,29 @@ const TimelineEditor: React.FC = () => {
                     const t = snapTimeExt(Math.max(0, Math.min(dur, (x / w) * dur)));
                     const valNorm = 1 - Math.max(0, Math.min(1, y / h));
                     const val = vMin + valNorm * vRange;
-                    updateKeyframeFor(laneProp, draggingIdx, { time: t, value: val });
+
+                    // group drag time shift
+                    if (groupDrag && groupDrag.prop === laneProp && selectedKFs.length > 1) {
+                      const dx = (x - groupDrag.startX) / w; // 0..1
+                      const dt = dx * dur;
+                      const nextKf = { ...(selected.kf || {}) } as any;
+                      for (const s of selectedKFs) {
+                        if (s.prop !== laneProp) continue;
+                        const arr = (nextKf[s.prop] || []).slice();
+                        if (arr[s.index]) {
+                          const nt = snapTimeExt(Math.max(0, Math.min(dur, (groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s.index)?.time ?? arr[s.index].time) + dt)));
+                          arr[s.index] = { ...arr[s.index], time: nt };
+                          nextKf[s.prop] = arr;
+                        }
+                      }
+                      updateLayer(selected.id, { kf: nextKf });
+                    } else {
+                      // single drag: time + value
+                      updateKeyframeFor(laneProp, draggingIdx, { time: t, value: val });
+                    }
                   }}
-                  onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); }}
-                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); }}
+                  onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); }}
+                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); }}
                   title={`Click to add keyframe on ${laneProp}`}
                 >
                   {/* grid lines */}
@@ -374,7 +450,29 @@ const TimelineEditor: React.FC = () => {
                         top: `${(1 - (Math.max(0, Math.min(1, (k.value - vMin) / vRange)))) * 100}%`
                       }}
                       title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
-                      onMouseDown={() => { setDraggingIdx(i); setDraggingProp(laneProp); setActiveKF({ prop: laneProp, index: i }); }}
+                      onMouseDown={(ev) => {
+                        setDraggingIdx(i);
+                        setDraggingProp(laneProp);
+                        setActiveKF({ prop: laneProp, index: i });
+                        // selection toggle with Shift
+                        if (ev.shiftKey) {
+                          setSelectedKFs((prev) => {
+                            const exists = prev.find((p) => p.prop === laneProp && p.index === i);
+                            if (exists) return prev.filter((p) => !(p.prop === laneProp && p.index === i));
+                            return [...prev, { prop: laneProp, index: i }];
+                          });
+                        } else {
+                          setSelectedKFs([{ prop: laneProp, index: i }]);
+                        }
+                        // prepare group drag start
+                        const arr = ((selected.kf?.[laneProp] as any[]) || []).slice();
+                        const startTimes = (ev.shiftKey ? selectedKFs : [{ prop: laneProp, index: i }]).map((sel) => {
+                          const cur = arr[sel.index];
+                          return { prop: sel.prop, index: sel.index, time: cur?.time ?? 0 };
+                        });
+                        const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
+                        setGroupDrag({ prop: laneProp, startX: ev.clientX - rect.left, startTimes });
+                      }}
                     />
                   ))}
                 </div>
@@ -495,6 +593,79 @@ const TimelineEditor: React.FC = () => {
                 </li>
               ))}
           </ul>
+
+          {/* Bezier handle editor for active keyframe */}
+          {activeKF && Array.isArray(selected.kf?.[activeKF.prop]) && (() => {
+            const arr = (selected.kf![activeKF.prop] as any[]).slice();
+            const cur = arr[activeKF.index];
+            if (!cur || cur.easing !== "bezier") return null;
+            const bz = cur.bezier || { x1: 0.25, y1: 0.1, x2: 0.25, y2: 1 };
+            // Build curve path within 0..1 square
+            let path = "";
+            for (let i = 0; i <= 50; i++) {
+              const t = i / 50;
+              const u = 1 - t;
+              // cubic bezier X: not used for time interpolation here, we visualize Y vs t
+              const y = (3 * u * u * t * bz.y1) + (3 * u * t * t * bz.y2) + (t * t * t);
+              const x = t;
+              path += i === 0 ? `M ${x} ${1 - y}` : ` L ${x} ${1 - y}`;
+            }
+            const handleP1 = { x: bz.x1, y: 1 - bz.y1 };
+            const handleP2 = { x: bz.x2, y: 1 - bz.y2 };
+
+            return (
+              <div className="mt-3 p-2 bg-gray-900 border border-gray-800 rounded">
+                <div className="text-[11px] text-gray-400 mb-1">
+                  Bezier easing editor (prop: {activeKF.prop}, keyframe #{activeKF.index + 1})
+                </div>
+                <div
+                  className="relative w-40 h-40 bg-gray-800 rounded"
+                  onMouseMove={(e) => {
+                    if (!bezierDrag) return;
+                    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                    const newBz = {
+                      x1: bezierDrag === "p1" ? x : bz.x1,
+                      y1: bezierDrag === "p1" ? (1 - y) : bz.y1,
+                      x2: bezierDrag === "p2" ? x : bz.x2,
+                      y2: bezierDrag === "p2" ? (1 - y) : bz.y2
+                    };
+                    updateKeyframeFor(activeKF.prop, activeKF.index, { easing: "bezier", bezier: newBz } as any);
+                  }}
+                  onMouseUp={() => setBezierDrag(null)}
+                  onMouseLeave={() => setBezierDrag(null)}
+                >
+                  <svg className="absolute inset-0" viewBox="0 0 1 1" preserveAspectRatio="none">
+                    <rect x="0" y="0" width="1" height="1" fill="none" stroke="#444" strokeWidth="0.002" />
+                    <path d={path} fill="none" stroke="#22d3ee" strokeWidth="0.005" />
+                    {/* handles */}
+                    <circle cx={handleP1.x} cy={handleP1.y} r="0.02" fill="#6366f1"
+                      onMouseDown={() => setBezierDrag("p1")}
+                    />
+                    <circle cx={handleP2.x} cy={handleP2.y} r="0.02" fill="#6366f1"
+                      onMouseDown={() => setBezierDrag("p2")}
+                    />
+                    {/* guide lines */}
+                    <line x1="0" y1="1" x2={handleP1.x} y2={handleP1.y} stroke="#555" strokeWidth="0.003" />
+                    <line x1="1" y1="0" x2={handleP2.x} y2={handleP2.y} stroke="#555" strokeWidth="0.003" />
+                  </svg>
+                </div>
+                <div className="mt-2 flex gap-2 items-center">
+                  <button
+                    className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+                    onClick={() => updateKeyframeFor(activeKF.prop, activeKF.index, { easing: "bezier", bezier: { x1: 0.25, y1: 0.1, x2: 0.25, y2: 1 } } as any)}
+                    title="Reset to default"
+                  >
+                    Reset
+                  </button>
+                  <div className="text-[11px] text-gray-400">
+                    x1={bz.x1.toFixed(2)}, y1={bz.y1.toFixed(2)}, x2={bz.x2.toFixed(2)}, y2={bz.y2.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
