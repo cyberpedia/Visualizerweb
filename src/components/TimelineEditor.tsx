@@ -6,6 +6,37 @@ type PropKey = "x" | "y" | "opacity" | "size" | "rotation";
 
 const props: PropKey[] = ["x", "y", "opacity", "size", "rotation"];
 
+// helpers for curve rendering
+function cubicBezierY(t: number, x1: number, y1: number, x2: number, y2: number): number {
+  const u = 1 - t;
+  return (3 * u * u * t * y1) + (3 * u * t * t * y2) + (t * t * t);
+}
+
+function interpKF(kf: any[] | undefined, t: number, base: number): number {
+  if (!kf || kf.length === 0) return base;
+  const sorted = kf.slice().sort((a: any, b: any) => a.time - b.time);
+  if (t <= sorted[0].time) return sorted[0].value;
+  if (t >= sorted[sorted.length - 1].time) return sorted[sorted.length - 1].value;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    if (t >= a.time && t <= b.time) {
+      const tt = (t - a.time) / (b.time - a.time);
+      const ease = a.easing ?? "linear";
+      let e =
+        ease === "easeIn" ? tt * tt :
+        ease === "easeOut" ? tt * (2 - tt) :
+        ease === "easeInOut" ? (tt < 0.5 ? 2 * tt * tt : -1 + (4 - 2 * tt) * tt) :
+        tt;
+      if (ease === "bezier" && a.bezier) {
+        e = cubicBezierY(tt, a.bezier.x1, a.bezier.y1, a.bezier.x2, a.bezier.y2);
+      }
+      return a.value + (b.value - a.value) * e;
+    }
+  }
+  return base;
+}
+
 const TimelineEditor: React.FC = () => {
   const template = usePlayerStore((s) => s.visualizerTemplate);
   const updateLayer = usePlayerStore((s) => s.updateLayer);
@@ -23,6 +54,8 @@ const TimelineEditor: React.FC = () => {
   const [zoom, setZoom] = useState<number>(1);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [draggingProp, setDraggingProp] = useState<PropKey | null>(null);
+  const [activeKF, setActiveKF] = useState<{ prop: PropKey; index: number } | null>(null);
+  const [clipboardKF, setClipboardKF] = useState<{ prop: PropKey; kf: any } | null>(null);
 
   const layers = useMemo(() => (template.layers ?? []).slice().sort((a, b) => a.zIndex - b.zIndex), [template.layers]);
   const selected = layers.find((l) => l.id === layerId) as any;
@@ -64,6 +97,15 @@ const TimelineEditor: React.FC = () => {
     updateLayer(selected.id, { kf: nextKf });
   };
 
+  const removeKeyframeFor = (propKey: PropKey, idx: number) => {
+    if (!selected) return;
+    const nextKf = { ...(selected.kf || {}) } as any;
+    const list = Array.isArray(nextKf[propKey]) ? nextKf[propKey].slice() : [];
+    list.splice(idx, 1);
+    nextKf[propKey] = list;
+    updateLayer(selected.id, { kf: nextKf });
+  };
+
   return (
     <div className="p-3 border-t border-gray-800">
       <div className="flex items-center justify-between mb-2">
@@ -73,7 +115,39 @@ const TimelineEditor: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-2 grid grid-cols-3 gap-2">
+      {/* keybindings */}
+      <div
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (!selected) return;
+          if (e.key === "Delete" || e.key === "Backspace") {
+            if (activeKF) {
+              removeKeyframeFor(activeKF.prop, activeKF.index);
+              e.preventDefault();
+            }
+          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+            if (activeKF) {
+              const arr = ((selected.kf?.[activeKF.prop] as any[]) || []).slice();
+              const cur = arr[activeKF.index];
+              if (cur) {
+                setClipboardKF({ prop: activeKF.prop, kf: { ...cur } });
+              }
+              e.preventDefault();
+            }
+          } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+            if (clipboardKF) {
+              const nextKf = { ...(selected.kf || {}) } as any;
+              const list = Array.isArray(nextKf[clipboardKF.prop]) ? nextKf[clipboardKF.prop].slice() : [];
+              const t = snapTime(audioEngine.getCurrentTime());
+              list.push({ ...clipboardKF.kf, time: t });
+              nextKf[clipboardKF.prop] = list;
+              updateLayer(selected.id, { kf: nextKf });
+              e.preventDefault();
+            }
+          }
+        }}
+        className="mb-2 grid grid-cols-3 gap-2 outline-none"
+      >
         <label className="text-xs flex items-center gap-2">
           <input
             type="checkbox"
@@ -174,19 +248,82 @@ const TimelineEditor: React.FC = () => {
           {props.map((laneProp) => {
             const kfs = (selected.kf?.[laneProp] as any[]) || [];
             const sortedKfs = kfs.slice().sort((a, b) => a.time - b.time);
+
+            // derive duration and sampling
+            const dur = isFinite(duration) && duration > 0 ? duration : 60;
+            const samples = 64;
+
+            // compute curve min/max by sampling to scale vertically
+            const baseVal = (selected as any)[laneProp] ?? 0;
+            const vals: number[] = [];
+            for (let i = 0; i <= samples; i++) {
+              const tt = (i / samples) * dur;
+              vals.push(interpKF(sortedKfs, tt, baseVal));
+            }
+            const vMin = Math.min(...vals);
+            const vMax = Math.max(...vals);
+            const vRange = vMax - vMin || 1;
+
+            // build normalized path (viewBox 0..1000 x, 0..100 y)
+            let d = "";
+            for (let i = 0; i <= samples; i++) {
+              const tt = (i / samples) * dur;
+              const val = interpKF(sortedKfs, tt, baseVal);
+              const nx = (i / samples) * (1000 / zoom);
+              const ny = (1 - (val - vMin) / vRange) * 100;
+              d += (i === 0 ? `M ${nx} ${ny}` : ` L ${nx} ${ny}`);
+            }
+
+            // extended snapping to markers and other keyframes
+            const snapTimeExt = (t: number) => {
+              if (!snapEnabled) return t;
+              const baseSnap = Math.round(t / snapStep) * snapStep;
+              let best = baseSnap;
+              let bestDiff = Math.abs(best - t);
+              // marker snapping
+              for (const m of markers) {
+                const diff = Math.abs(m - t);
+                if (diff < bestDiff && diff <= snapStep * 0.5) {
+                  best = m; bestDiff = diff;
+                }
+              }
+              // keyframe snapping (other times)
+              for (const k of sortedKfs) {
+                const diff = Math.abs(k.time - t);
+                if (diff < bestDiff && diff <= snapStep * 0.5) {
+                  best = k.time; bestDiff = diff;
+                }
+              }
+              return Math.max(0, Math.min(dur, best));
+            };
+
             return (
               <div key={laneProp} className="relative w-full h-14 bg-gray-900 border border-gray-800 rounded">
                 <div className="absolute left-2 top-1 text-[11px] text-gray-400">{laneProp}</div>
+
+                {/* curve path */}
+                <svg className="absolute inset-0" viewBox={`0 0 ${1000 / zoom} 100`} preserveAspectRatio="none">
+                  <path d={d} fill="none" stroke="url(#gradTimeline)" strokeWidth={1} />
+                  <defs>
+                    <linearGradient id="gradTimeline" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#6366f1" />
+                      <stop offset="100%" stopColor="#22d3ee" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+
                 <div
                   className="absolute inset-0"
                   onClick={(e) => {
                     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                     const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
                     const w = rect.width;
-                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
-                    const t = snapTime((x / w) * dur / zoom);
-                    const curVal = (selected as any)[laneProp] ?? 0;
-                    const kf = { time: t, value: curVal, easing: "linear" as const };
+                    const h = rect.height;
+                    const t = snapTimeExt((x / w) * dur);
+                    const valNorm = 1 - Math.max(0, Math.min(1, y / h));
+                    const val = vMin + valNorm * vRange;
+                    const kf = { time: t, value: val, easing: "linear" as const };
                     const nextKf = { ...(selected.kf || {}) } as any;
                     const list = Array.isArray(nextKf[laneProp]) ? nextKf[laneProp].slice() : [];
                     list.push(kf);
@@ -198,10 +335,13 @@ const TimelineEditor: React.FC = () => {
                     if (draggingProp !== laneProp) return;
                     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                     const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
                     const w = rect.width;
-                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
-                    const t = snapTime(Math.max(0, Math.min(dur, (x / w) * dur / zoom)));
-                    updateKeyframeFor(laneProp, draggingIdx, { time: t });
+                    const h = rect.height;
+                    const t = snapTimeExt(Math.max(0, Math.min(dur, (x / w) * dur)));
+                    const valNorm = 1 - Math.max(0, Math.min(1, y / h));
+                    const val = vMin + valNorm * vRange;
+                    updateKeyframeFor(laneProp, draggingIdx, { time: t, value: val });
                   }}
                   onMouseUp={() => { setDraggingIdx(null); setDraggingProp(null); }}
                   onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); }}
@@ -219,7 +359,7 @@ const TimelineEditor: React.FC = () => {
                     <div key={i}
                       className="absolute top-0 bottom-0 border-l border-gray-600"
                       style={{
-                        left: `${(Math.min(1, m / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`
+                        left: `${(Math.min(1, m / dur) * 100) * (1 / zoom)}%`
                       }}
                       title={`${m.toFixed(2)}s`}
                     />
@@ -229,11 +369,12 @@ const TimelineEditor: React.FC = () => {
                     <div key={i}
                       className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-ew-resize"
                       style={{
-                        left: `${(Math.min(1, k.time / (isFinite(duration) && duration > 0 ? duration : 60)) * 100) * (1 / zoom)}%`,
-                        top: "50%"
+                        left: `${(Math.min(1, k.time / dur) * 100) * (1 / zoom)}%`,
+                        // place marker vertically near curve value (approximate)
+                        top: `${(1 - (Math.max(0, Math.min(1, (k.value - vMin) / vRange)))) * 100}%`
                       }}
                       title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
-                      onMouseDown={() => { setDraggingIdx(i); setDraggingProp(laneProp); }}
+                      onMouseDown={() => { setDraggingIdx(i); setDraggingProp(laneProp); setActiveKF({ prop: laneProp, index: i }); }}
                     />
                   ))}
                 </div>
