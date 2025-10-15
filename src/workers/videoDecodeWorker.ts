@@ -16,6 +16,14 @@ type FrameMsg = {
   bytes: ArrayBuffer;
 };
 
+type RawFrameMsg = {
+  type: "frameRaw";
+  index: number;
+  width: number;
+  height: number;
+  rgba: ArrayBuffer; // RGBA8 pixel data
+};
+
 type DoneMsg = { type: "done" };
 type ErrorMsg = { type: "error"; message: string };
 type InfoMsg = { type: "info"; message: string };
@@ -79,15 +87,14 @@ async function decodeWithWebCodecs(bytes: ArrayBuffer, fps: number, width: numbe
         const idx = (decodeWithWebCodecs as any)._index as number;
         const step = 1 / fps;
         if (tsSec + 1e-6 >= nextT) {
-          // Draw to OffscreenCanvas and emit PNG bytes
+          // Draw to OffscreenCanvas and emit raw RGBA bytes
           const off = new OffscreenCanvas(width, height);
           const ctx = off.getContext("2d")!;
-          // drawImage accepts VideoFrame directly
           ctx.drawImage(frame, 0, 0, width, height);
-          const blob = await off.convertToBlob({ type: "image/png" });
-          const ab = await blob.arrayBuffer();
-          const msg: FrameMsg = { type: "frame", index: idx, bytes: ab };
-          (self as any).postMessage(msg, [msg.bytes]);
+          const imgData = ctx.getImageData(0, 0, width, height);
+          const rgba = imgData.data.buffer;
+          const msg: RawFrameMsg = { type: "frameRaw", index: idx, width, height, rgba };
+          (self as any).postMessage(msg, [msg.rgba]);
           (decodeWithWebCodecs as any)._nextTimeSec = nextT + step;
           (decodeWithWebCodecs as any)._index = idx + 1;
         }

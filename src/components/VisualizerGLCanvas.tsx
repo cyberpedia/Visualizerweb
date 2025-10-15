@@ -566,8 +566,8 @@ void main(){
     const aTexCompLoc = gl.getAttribLocation(progComposite, "aTex");
     const uSceneLoc = gl.getUniformLocation(progComposite, "uScene");
     const uBloomLoc = gl.getUniformLocation(progComposite, "uBloom");
-    const uIntensityLoc = gl.getUniformLocation(progComposite, "uIntensit_codey"new)</;
-   // Layer composite locations
+    const uIntensityLoc = gl.getUniformLocation(progComposite, "uIntensity");
+    // Layer composite locations
     const aPosLCLoc = gl.getAttribLocation(progLayerComposite, "aPos");
     const aTexLCLoc = gl.getAttribLocation(progLayerComposite, "aTex");
     const uSceneLCLoc = gl.getUniformLocation(progLayerComposite, "uScene");

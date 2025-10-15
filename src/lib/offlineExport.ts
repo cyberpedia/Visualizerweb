@@ -666,6 +666,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
     workers.push(decodeWorker);
 
     const bgFramesAll: { index: number; bytes: ArrayBuffer }[] = [];
+    const bgFramesRawAll: { index: number; width: number; height: number; rgba: ArrayBuffer }[] = [];
     let decodeDone = false;
 
     const bgFetch = async (): Promise<ArrayBuffer> => {
@@ -681,6 +682,8 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
       const msg = ev.data;
       if (msg.type === "frame") {
         bgFramesAll.push({ index: msg.index, bytes: msg.bytes as ArrayBuffer });
+      } else if (msg.type === "frameRaw") {
+        bgFramesRawAll.push({ index: msg.index, width: msg.width, height: msg.height, rgba: msg.rgba as ArrayBuffer });
       } else if (msg.type === "done") {
         decodeDone = true;
       }
@@ -726,6 +729,7 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
 
       // select bg frames for this range
       const bgFramesRange = bgFramesAll.filter((f) => f.index >= range.start && f.index < range.end);
+      const bgFramesRawRange = bgFramesRawAll.filter((f) => f.index >= range.start && f.index < range.end);
 
       const initMsg = {
         type: "init",
@@ -740,10 +744,14 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
         template,
         track: { title: track?.name ?? "", artist: track?.artist ?? "", artSrc: track?.artUrl || undefined },
         assets: includeAssets ? {
-          bgFrames: bgFramesRange,
+          bgFrames: bgFramesRange.length ? bgFramesRange : undefined,
+          bgFramesRaw: bgFramesRawRange.length ? bgFramesRawRange : undefined,
           art: artBytes ? artBytes.buffer : undefined,
           layers: layerBytes.length ? layerBytes : undefined
-        } : { bgFrames: bgFramesRange },
+        } : {
+          bgFrames: bgFramesRange.length ? bgFramesRange : undefined,
+          bgFramesRaw: bgFramesRawRange.length ? bgFramesRawRange : undefined
+        },
         rangeStart: range.start,
         rangeEnd: range.end,
         seedPrevMag: seedPrevBuf,
@@ -752,7 +760,14 @@ export async function exportOfflineMP4(opts: OfflineExportOptions): Promise<Blob
         seedLastBeatT: seeds.seedLastBeatT
       } as any;
 
-      const transfers: any[] = useSAB ? [] : [segment.buffer, seedPrevBuf, seedFluxBuf, seedBeatBuf, ...bgFramesRange.map((f) => f.bytes)];
+      const transfers: any[] = useSAB ? [] : [
+        segment.buffer,
+        seedPrevBuf,
+        seedFluxBuf,
+        seedBeatBuf,
+        ...bgFramesRange.map((f) => f.bytes),
+        ...bgFramesRawRange.map((f) => f.rgba)
+      ];
       w.postMessage(initMsg, transfers);
 
       w.onmessage = (ev: MessageEvent<any>) => {

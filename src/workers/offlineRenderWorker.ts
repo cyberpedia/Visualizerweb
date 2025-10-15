@@ -19,6 +19,7 @@ type InitMsg = {
   assets: {
     bg?: ArrayBuffer;
     bgFrames?: { index: number; bytes: ArrayBuffer }[];
+    bgFramesRaw?: { index: number; width: number; height: number; rgba: ArrayBuffer }[];
     art?: ArrayBuffer;
     layers?: { id: string; bytes: ArrayBuffer }[];
   };
@@ -626,6 +627,8 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
   const maskCache = new Map<string, ImageBitmap>();
   const bgFrameBytes = new Map<number, ArrayBuffer>();
   const bgFrameBitmaps = new Map<number, ImageBitmap>();
+  const bgFrameRaw = new Map<number, { width: number; height: number; rgba: ArrayBuffer }>();
+  const bgFrameRawBitmaps = new Map<number, ImageBitmap>();
 
   try {
     if (assets.bg) {
@@ -637,6 +640,11 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
     if (assets.bgFrames && assets.bgFrames.length) {
       for (const f of assets.bgFrames) {
         bgFrameBytes.set(f.index, f.bytes);
+      }
+    }
+    if (assets.bgFramesRaw && assets.bgFramesRaw.length) {
+      for (const f of assets.bgFramesRaw) {
+        bgFrameRaw.set(f.index, { width: f.width, height: f.height, rgba: f.rgba });
       }
     }
   } catch {}
@@ -718,7 +726,23 @@ self.onmessage = async (e: MessageEvent<InitMsg | AbortMsg>) => {
 
     // clear / background
     ctx.clearRect(0, 0, width, height);
-    if (bgFrameBytes.size > 0) {
+    // Prefer raw RGBA frames if available (faster than PNG decode)
+    if (bgFrameRaw.size > 0) {
+      const raw = bgFrameRaw.get(i);
+      if (raw) {
+        let bmp = bgFrameRawBitmaps.get(i) || null;
+        if (!bmp) {
+          try {
+            const id = new ImageData(new Uint8ClampedArray(raw.rgba), raw.width, raw.height);
+            bmp = await createImageBitmap(id);
+            bgFrameRawBitmaps.set(i, bmp!);
+          } catch {}
+        }
+        if (bmp) {
+          ctx.drawImage(bmp, 0, 0, width, height);
+        }
+      }
+    } else if (bgFrameBytes.size > 0) {
       const bytes = bgFrameBytes.get(i);
       if (bytes) {
         let bmp = bgFrameBitmaps.get(i) || null;

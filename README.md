@@ -42,7 +42,7 @@ Visualizers and overlays
 - Per-layer blend modes (source-over, additive/lighter, multiply, screen) and masks (rect/circle/image/polygon) on Canvas/Offline paths; WebGL path supports additive and shader-based multiply/screen for overlays and layers with rect/circle/image masks (polygon masks for text/image via rasterized mask textures)
 - WebGL per-layer filters (text, image, shape, progress ring): blur, hue-rotate, saturate, brightness, contrast. Filters are applied as offscreen passes and composited with the chosen blend mode or source-over.
 - Mask transforms (WebGL): rect mask translation/scale via scissor; circle mask translation/scale for text/image layers; image/polygon masks support UV-space translation/scale and rotation for text and image layers (parity with Canvas/Offline).
-- Keyframe timeline for animatable properties (x, y, opacity, size, rotation) with zoom (mouse wheel), markers, click-to-add, multi-select and group drag, copy/paste (with optional relative offsets), lane-aware snapping, invert selection, duplicate to markers, normalize lane values, and bezier easing per keyframe with both a dedicated editor and inline segment handle overlays (including on-curve handles). Alt+Drag selects by time+value in the current lane; Alt+Shift+Drag selects by time across all lanes.
+- Keyframe timeline for animatable properties (x, y, opacity, size, rotation) with zoom (mouse wheel), markers, click-to-add, multi-select and group drag, copy/paste (with optional relative offsets), lane-aware snapping, invert selection, duplicate to markers, normalize lane values, and bezier easing per keyframe with both a dedicated editor and inline segment handle overlays (including on-curve handles). Alt+Drag selects by time+value in the current lane; Alt+Shift+Drag selects by time across all lanes. Includes a mini‑map with draggable viewport and wheel zoom for quick navigation.
 - Template Gallery with defaults, user presets; template import/export (JSON)
 - Editor grid overlay with configurable grid size (for alignment)
 
@@ -52,7 +52,7 @@ Beat detection and info
 
 Background media
 - Background image URL
-- Background video: realtime rendering in Canvas2D/WebGL; offline export uses a worker-side decoder—WebCodecs with MP4 demux (mp4box.js) where supported, with ffmpeg.wasm fallback—for deterministic compositing
+- Background video: realtime rendering in Canvas2D/WebGL; offline export uses a worker-side decoder—WebCodecs with MP4 demux (mp4box.js) where supported, with ffmpeg.wasm fallback—for deterministic compositing. When WebCodecs is used, raw RGBA frames are streamed to render workers (avoiding PNG decode) for faster processing.
 
 Export
 - Realtime export (WebM): CanvasCaptureMediaStream + WebAudio MediaStreamDestination + MediaRecorder

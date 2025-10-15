@@ -77,6 +77,7 @@ const TimelineEditor: React.FC = () => {
   const [panSec, setPanSec] = useState<number>(0);
   const [spaceDown, setSpaceDown] = useState<boolean>(false);
   const [panning, setPanning] = useState<{ startX: number; startPan: number } | null>(null);
+  const [miniDrag, setMiniDrag] = useState<boolean>(false);
 
   // inline bezier segment editor state
   const [inlineBezierEdit, setInlineBezierEdit] = useState<{ prop: PropKey; startIndex: number; dragging: "p1" | "p2" | null } | null>(null);
@@ -1132,6 +1133,69 @@ const TimelineEditor: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* Mini-map timeline */}
+      {selected && (() => {
+        const dur = isFinite(duration) && duration > 0 ? duration : 60;
+        const visDur = dur / zoom;
+        const startT = Math.max(0, Math.min(dur - visDur, panSec));
+        const leftPct = (startT / dur) * 100;
+        const widthPct = (visDur / dur) * 100;
+
+        return (
+          <div className="mb-3">
+            <div className="text-[11px] text-gray-400 mb-1">Mini‑map</div>
+            <div
+              className="relative h-6 bg-gray-800 border border-gray-700 rounded"
+              onMouseDown={(e) => {
+                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                const w = rect.width;
+                const x = e.clientX - rect.left;
+                const ratio = Math.max(0, Math.min(1, x / w));
+                const newPan = Math.max(0, Math.min(dur - visDur, ratio * dur - visDur * 0.5));
+                setPanSec(newPan);
+                setMiniDrag(true);
+              }}
+              onMouseMove={(e) => {
+                if (!miniDrag) return;
+                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                const w = rect.width;
+                const x = e.clientX - rect.left;
+                const ratio = Math.max(0, Math.min(1, x / w));
+                const newPan = Math.max(0, Math.min(dur - visDur, ratio * dur - visDur * 0.5));
+                setPanSec(newPan);
+              }}
+              onMouseUp={() => setMiniDrag(false)}
+              onMouseLeave={() => setMiniDrag(false)}
+              onWheel={(e) => {
+                e.preventDefault();
+                const newZoom = Math.max(0.5, Math.min(4, zoom + Math.sign(e.deltaY) * -0.1));
+                // center zoom around current viewport center
+                const centerT = startT + visDur * 0.5;
+                const newVisDur = dur / newZoom;
+                const newPan = Math.max(0, Math.min(dur - newVisDur, centerT - newVisDur * 0.5));
+                setZoom(newZoom);
+                setPanSec(newPan);
+              }}
+              title="Click/drag to pan; wheel to zoom"
+            >
+              {/* markers */}
+              {markers.map((m, i) => (
+                <div
+                  key={i}
+                  className="absolute top-0 bottom-0 border-l border-gray-600"
+                  style={{ left: `${(Math.min(1, m / dur) * 100)}%` }}
+                />
+              ))}
+              {/* viewport window */}
+              <div
+                className="absolute top-0 bottom-0 bg-indigo-500/20 border border-indigo-400 rounded"
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })()}
 
       {selected && (
         <div className="text-xs">
