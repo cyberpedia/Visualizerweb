@@ -1669,6 +1669,52 @@ void main(){
 
           if (needsOffscreen) {
             let currentTex: WebGLTexture = texLayer!;
+            // apply image/polygon mask to shape if present
+            if (layer.mask && (layer.mask.type === "image" || (layer.mask.type === "polygon" && Array.isArray(layer.mask.points)))) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+              gl.useProgram(progTexImgMask);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosTexImgMaskLoc);
+              gl.vertexAttribPointer(aPosTexImgMaskLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexTexImgMaskLoc);
+              gl.vertexAttribPointer(aTexTexImgMaskLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uSamplerTexImgLoc, 0);
+              gl.activeTexture(gl.TEXTURE1);
+              if (layer.mask.type === "image" && layer.mask.src) {
+                const mInfo = imageCache.get(layer.mask.src) || null;
+                if (!mInfo) {
+                  void makeTextureFromImage(layer.mask.src);
+                } else {
+                  gl.bindTexture(gl.TEXTURE_2D, mInfo.tex);
+                }
+              } else {
+                const shapeW = layer.shape === "rect" ? (layer.width ?? 100) : (layer.radius ?? 40) * 2;
+                const shapeH = layer.shape === "rect" ? (layer.height ?? 50) : (layer.radius ?? 40) * 2;
+                const maskTexInfo = makePolygonMaskTexture(shapeW, shapeH, layer.mask.points);
+                gl.bindTexture(gl.TEXTURE_2D, maskTexInfo.tex);
+              }
+              gl.uniform1i(uSamplerMaskImgLoc, 1);
+              gl.uniform1f(uAlphaTexImgMaskLoc, 1.0);
+              const mtx = (layer as any).maskTransform || {};
+              const sX = mtx.scaleX || 1.0;
+              const sY = mtx.scaleY || 1.0;
+              const offX = (mtx.x || 0) / Math.max(1, (layer.width ?? ((layer.radius ?? 40) * 2)));
+              const offY = (mtx.y || 0) / Math.max(1, (layer.height ?? ((layer.radius ?? 40) * 2)));
+              const rotRad = ((mtx.rotation || 0) * Math.PI) / 180.0;
+              gl.uniform2f(uMaskScaleTexImgLoc, sX, sY);
+              gl.uniform2f(uMaskOffsetTexImgLoc, offX, offY);
+              gl.uniform1f(uMaskRotTexImgLoc, rotRad);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              // swap scratch into layer
+              const tTmp2 = texLayer; texLayer = texScratch; texScratch = tTmp2;
+              const fTmp2 = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2;
+              currentTex = texLayer!;
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+            }
+
             if (blurPx > 0.0) {
               gl.bindFramebuffer(gl.FRAMEBUFFER, fboPing);
               gl.useProgram(progBlur);
@@ -1710,8 +1756,9 @@ void main(){
               gl.uniform1f(uBrightLoc, bright);
               gl.uniform1f(uContrastLoc, contr);
               gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
-              const tTmp2 = texLayer; texLayer = texScratch; texScratch = tTmp2;
-              const fTmp2 = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2;
+              // swap scratch into layer
+              const tTmp2b = texLayer; texLayer = texScratch; texScratch = tTmp2b;
+              const fTmp2b = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2b;
               currentTex = texLayer!;
               gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
             }
@@ -1786,8 +1833,22 @@ void main(){
             push(x + Math.cos(a1) * r1, y + Math.sin(a1) * r1);
           }
           const col = hexToRGB(layer.color1 || "#ffffff");
+
+          // Filters
+          const filters = (layer as any).filters || {};
+          const blurPx = Math.max(0.0, filters.blur || 0.0);
+          const hueDeg = filters.hue || 0.0;
+          const sat = filters.saturate !== undefined ? filters.saturate : 1.0;
+          const bright = filters.brightness !== undefined ? filters.brightness : 1.0;
+          const contr = filters.contrast !== undefined ? filters.contrast : 1.0;
+          const hasColorAdjust = Math.abs(hueDeg) > 0.001 || Math.abs(sat - 1.0) > 0.001 || Math.abs(bright - 1.0) > 0.001 || Math.abs(contr - 1.0) > 0.001;
+
           const specialBlend = layer.blendMode === "multiply" || layer.blendMode === "screen";
-          if (specialBlend) {
+          const isImgMask = !!(layer.mask && layer.mask.type === "image" && layer.mask.src);
+          const isPolyMask = !!(layer.mask && layer.mask.type === "polygon" && Array.isArray(layer.mask.points));
+          const needsOffscreen = specialBlend || blurPx > 0.0 || hasColorAdjust || isImgMask || isPolyMask;
+
+          if (needsOffscreen) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboLayer);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1802,7 +1863,103 @@ void main(){
           gl.uniform1f(uAlphaColorLoc, opacity);
           gl.drawArrays(gl.TRIANGLES, 0, segments * 6);
 
-          if (specialBlend) {
+          if (needsOffscreen) {
+            let currentTex: WebGLTexture = texLayer!;
+            // apply image/polygon mask for ring if present
+            if (isImgMask || isPolyMask) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+              gl.useProgram(progTexImgMask);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosTexImgMaskLoc);
+              gl.vertexAttribPointer(aPosTexImgMaskLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexTexImgMaskLoc);
+              gl.vertexAttribPointer(aTexTexImgMaskLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uSamplerTexImgLoc, 0);
+              gl.activeTexture(gl.TEXTURE1);
+              if (isImgMask) {
+                const mInfo = imageCache.get((layer.mask as any).src) || null;
+                if (!mInfo) {
+                  void makeTextureFromImage((layer.mask as any).src);
+                } else {
+                  gl.bindTexture(gl.TEXTURE_2D, mInfo.tex);
+                }
+              } else if (isPolyMask) {
+                const outer = radius + thick;
+                const maskTexInfo = makePolygonMaskTexture(outer * 2, outer * 2, (layer.mask as any).points);
+                gl.bindTexture(gl.TEXTURE_2D, maskTexInfo.tex);
+              }
+              gl.uniform1i(uSamplerMaskImgLoc, 1);
+              gl.uniform1f(uAlphaTexImgMaskLoc, 1.0);
+              const mtx = (layer as any).maskTransform || {};
+              const sX = mtx.scaleX || 1.0;
+              const sY = mtx.scaleY || 1.0;
+              const offX = (mtx.x || 0) / Math.max(1, (radius + thick) * 2);
+              const offY = (mtx.y || 0) / Math.max(1, (radius + thick) * 2);
+              const rotRad = ((mtx.rotation || 0) * Math.PI) / 180.0;
+              gl.uniform2f(uMaskScaleTexImgLoc, sX, sY);
+              gl.uniform2f(uMaskOffsetTexImgLoc, offX, offY);
+              gl.uniform1f(uMaskRotTexImgLoc, rotRad);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              // swap scratch into layer
+              const tTmp2 = texLayer; texLayer = texScratch; texScratch = tTmp2;
+              const fTmp2 = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2;
+              currentTex = texLayer!;
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+            }
+
+            // filters
+            if (blurPx > 0.0) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboPing);
+              gl.useProgram(progBlur);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosQuadLoc);
+              gl.vertexAttribPointer(aPosQuadLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexQuadLoc);
+              gl.vertexAttribPointer(aTexQuadLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uTexBlurLoc, 0);
+              gl.uniform2f(uTexelLoc, blurPx / canvas.width, 0.0);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboPong);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, texPing!);
+              gl.uniform1i(uTexBlurLoc, 0);
+              gl.uniform2f(uTexelLoc, 0.0, blurPx / canvas.height);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              currentTex = texPong!;
+            }
+
+            if (hasColorAdjust) {
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
+              gl.useProgram(progFilter);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+              gl.enableVertexAttribArray(aPosFiltLoc);
+              gl.vertexAttribPointer(aPosFiltLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.bindBuffer(gl.ARRAY_BUFFER, bufQuadTex);
+              gl.enableVertexAttribArray(aTexFiltLoc);
+              gl.vertexAttribPointer(aTexFiltLoc, 2, gl.FLOAT, false, 0, 0);
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D, currentTex);
+              gl.uniform1i(uTexFilterLoc, 0);
+              gl.uniform1f(uHueLoc, hueDeg);
+              gl.uniform1f(uSatLoc, sat);
+              gl.uniform1f(uBrightLoc, bright);
+              gl.uniform1f(uContrastLoc, contr);
+              gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+              // swap scratch into layer
+              const tTmp2b = texLayer; texLayer = texScratch; texScratch = tTmp2b;
+              const fTmp2b = fboLayer; fboLayer = fboScratch; fboScratch = fTmp2b;
+              currentTex = texLayer!;
+              gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene);
+            }
+
+            // composite to scene with chosen blend
             gl.bindFramebuffer(gl.FRAMEBUFFER, fboScratch);
             gl.useProgram(progLayerComposite);
             gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
@@ -1815,9 +1972,9 @@ void main(){
             gl.bindTexture(gl.TEXTURE_2D, texScene!);
             gl.uniform1i(uSceneLCLoc, 0);
             gl.activeTexture(gl.TEXTURE1);
-            gl.bindTexture(gl.TEXTURE_2D, texLayer!);
+            gl.bindTexture(gl.TEXTURE_2D, currentTex);
             gl.uniform1i(uLayerLCLoc, 1);
-            gl.uniform1i(uModeLCLoc, layer.blendMode === "multiply" ? 1 : 2);
+            gl.uniform1i(uModeLCLoc, specialBlend ? (layer.blendMode === "multiply" ? 1 : 2) : 0);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
 
             const tTmp = texScene; texScene = texScratch; texScratch = tTmp;

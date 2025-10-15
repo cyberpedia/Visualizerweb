@@ -79,6 +79,9 @@ const TimelineEditor: React.FC = () => {
   // drag-rectangle brush selection
   const [brush, setBrush] = useState<{ active: boolean; lane: PropKey | null; x0: number; y0: number; x1: number; y1: number } | null>(null);
 
+  // show/hide on-curve bezier handle overlays
+  const [showHandles, setShowHandles] = useState<boolean>(true);
+
   // undo/redo stacks for selected layer's keyframes
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
@@ -552,6 +555,14 @@ const TimelineEditor: React.FC = () => {
         </button>
 
         <button
+          className="ml-4 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
+          onClick={() => setShowHandles((v) => !v)}
+          title="Toggle inline bezier handles visibility"
+        >
+          {showHandles ? "Hide handles" : "Show handles"}
+        </button>
+
+        <button
           className="ml-auto px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
           disabled={!selected || undoStack.length === 0}
           onClick={() => undo()}
@@ -704,7 +715,9 @@ const TimelineEditor: React.FC = () => {
                       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                       const x = e.clientX - rect.left;
                       const y = e.clientY - rect.top;
-                      setBrush({ active: true, lane: laneProp, x0: x, y0: y, x1: x, y1: y });
+                      // Alt+Shift => global (all lanes) time selection
+                      const laneSel: PropKey | null = e.shiftKey ? null : laneProp;
+                      setBrush({ active: true, lane: laneSel, x0: x, y0: y, x1: x, y1: y });
                       e.preventDefault();
                     }
                   }}
@@ -784,9 +797,9 @@ const TimelineEditor: React.FC = () => {
                   }}
                   onMouseUp={(e) => {
                     // finalize brush selection
+                    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                    const w = rect.width, h = rect.height;
                     if (brush?.active && brush.lane === laneProp) {
-                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                      const w = rect.width, h = rect.height;
                       const x0 = Math.min(brush.x0, brush.x1);
                       const y0 = Math.min(brush.y0, brush.y1);
                       const x1 = Math.max(brush.x0, brush.x1);
@@ -804,6 +817,24 @@ const TimelineEditor: React.FC = () => {
                         })
                         .map(({ idx }) => ({ prop: laneProp, index: idx }));
                       setSelectedKFs(inRect);
+                      setBrush(null);
+                    } else if (brush?.active && brush.lane === null) {
+                      // global time-based selection across all lanes
+                      const x0 = Math.min(brush.x0, brush.x1);
+                      const x1 = Math.max(brush.x0, brush.x1);
+                      const t0 = snapTimeExt((x0 / w) * dur);
+                      const t1 = snapTimeExt((x1 / w) * dur);
+                      const all: Array<{ prop: PropKey; index: number }> = [];
+                      for (const p of props) {
+                        const arr = ((selected.kf?.[p] as any[]) || []);
+                        arr.forEach((k: any, idx: number) => {
+                          const kt = k.time ?? 0;
+                          if (kt >= Math.min(t0, t1) && kt <= Math.max(t0, t1)) {
+                            all.push({ prop: p, index: idx });
+                          }
+                        });
+                      }
+                      setSelectedKFs(all);
                       setBrush(null);
                     }
                     setDraggingIdx(null);
@@ -951,7 +982,7 @@ const TimelineEditor: React.FC = () => {
                     const left2 = (Math.min(1, (a.time + (b.time - a.time) * bz.x2) / dur) * 100) * (1 / zoom);
                     const top2 = (1 - bz.y2) * 100;
 
-                    return (
+                    return showHandles ? (
                       <>
                         {box}
                         <div
@@ -967,7 +998,7 @@ const TimelineEditor: React.FC = () => {
                           title="Bezier handle P2"
                         />
                       </>
-                    );
+                    ) : null;
                   })}
                 </div>
               </div>
