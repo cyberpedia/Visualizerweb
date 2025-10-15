@@ -52,7 +52,7 @@ Beat detection and info
 
 Background media
 - Background image URL
-- Background video: realtime rendering in Canvas2D/WebGL; offline export uses worker-side ffmpeg.wasm decode for deterministic compositing
+- Background video: realtime rendering in Canvas2D/WebGL; offline export uses a worker-side decoder—WebCodecs with MP4 demux (mp4box.js) where supported, with ffmpeg.wasm fallback—for deterministic compositing
 
 Export
 - Realtime export (WebM): CanvasCaptureMediaStream + WebAudio MediaStreamDestination + MediaRecorder

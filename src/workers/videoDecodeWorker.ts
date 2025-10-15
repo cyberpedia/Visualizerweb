@@ -1,4 +1,5 @@
 import { createFFmpeg } from "@ffmpeg/ffmpeg";
+import MP4Box from "mp4box";
 
 type DecodeMsg = {
   type: "decode";
@@ -17,8 +18,107 @@ type FrameMsg = {
 
 type DoneMsg = { type: "done" };
 type ErrorMsg = { type: "error"; message: string };
+type InfoMsg = { type: "info"; message: string };
 
 let aborted = false;
+
+async function decodeWithWebCodecs(bytes: ArrayBuffer, fps: number, width: number, height: number): Promise<void> {
+  const hasWebCodecs = typeof (self as any).VideoDecoder !== "undefined";
+  if (!hasWebCodecs) throw new Error("WebCodecs not available");
+
+  // Demux MP4 using mp4box.js
+  const mp4boxfile = MP4Box.createFile();
+  let videoTrack: any = null;
+  let timescale = 0;
+
+  const chunks: Array<{ data: Uint8Array; timestamp: number; duration: number; type: "key" | "delta" }> = [];
+
+  mp4boxfile.onReady = (info: any) => {
+    if (info && info.videoTracks && info.videoTracks.length) {
+      videoTrack = info.videoTracks[0];
+      timescale = videoTrack.timescale || 1;
+      mp4boxfile.setExtractionOptions(videoTrack.id, "video", { nbSamples: 0, rapAlignment: true });
+      mp4boxfile.start();
+    } else {
+      throw new Error("No video track in container");
+    }
+  };
+
+  mp4boxfile.onSamples = (_id: number, _user: any, samples: any[]) => {
+    for (const s of samples) {
+      const data = s.data as Uint8Array;
+      const dts = s.dts as number;
+      const dur = s.duration as number;
+      const ts = Math.round((dts / timescale) * 1e6); // microseconds
+      const td = Math.round((dur / timescale) * 1e6);
+      chunks.push({ data, timestamp: ts, duration: td, type: s.is_sync ? "key" : "delta" });
+    }
+  };
+
+  // mp4box requires fileStart on buffer
+  (bytes as any).fileStart = 0;
+  mp4boxfile.appendBuffer(bytes);
+  mp4boxfile.flush();
+
+  if (!videoTrack) throw new Error("Video track not found");
+
+  // Configure decoder
+  const decoder = new (self as any).VideoDecoder({
+    output: async (frame: any) => {
+      try {
+        if (aborted) { frame.close(); return; }
+        const tsUs = frame.timestamp || 0;
+        const tsSec = tsUs / 1e6;
+
+        // Downsample to requested fps by scheduling next target time
+        if ((decodeWithWebCodecs as any)._nextTimeSec == null) {
+          (decodeWithWebCodecs as any)._nextTimeSec = 0;
+          (decodeWithWebCodecs as any)._index = 0;
+        }
+        const nextT = (decodeWithWebCodecs as any)._nextTimeSec as number;
+        const idx = (decodeWithWebCodecs as any)._index as number;
+        const step = 1 / fps;
+        if (tsSec + 1e-6 >= nextT) {
+          // Draw to OffscreenCanvas and emit PNG bytes
+          const off = new OffscreenCanvas(width, height);
+          const ctx = off.getContext("2d")!;
+          // drawImage accepts VideoFrame directly
+          ctx.drawImage(frame, 0, 0, width, height);
+          const blob = await off.convertToBlob({ type: "image/png" });
+          const ab = await blob.arrayBuffer();
+          const msg: FrameMsg = { type: "frame", index: idx, bytes: ab };
+          (self as any).postMessage(msg, [msg.bytes]);
+          (decodeWithWebCodecs as any)._nextTimeSec = nextT + step;
+          (decodeWithWebCodecs as any)._index = idx + 1;
+        }
+      } catch (e) {
+        // swallow per-frame errors
+      } finally {
+        try { frame.close(); } catch {}
+      }
+    },
+    error: (e: any) => {
+      // @ts-ignore
+      (self as any).postMessage({ type: "error", message: e?.message || String(e) } as ErrorMsg);
+    }
+  });
+
+  const codec = videoTrack.codec || "avc1.42E01E"; // default H.264 baseline if missing
+  decoder.configure({ codec, codedWidth: videoTrack.track_width || width, codedHeight: videoTrack.track_height || height });
+
+  // Feed chunks
+  for (const c of chunks) {
+    if (aborted) break;
+    const chunk = new (self as any).EncodedVideoChunk({
+      type: c.type,
+      timestamp: c.timestamp,
+      duration: c.duration,
+      data: c.data
+    });
+    decoder.decode(chunk);
+  }
+  await decoder.flush();
+}
 
 self.onmessage = async (e: MessageEvent<DecodeMsg | { type: "abort" }>) => {
   const data = e.data as any;
@@ -30,16 +130,24 @@ self.onmessage = async (e: MessageEvent<DecodeMsg | { type: "abort" }>) => {
 
   const { bytes, url, fps, width, height } = data as DecodeMsg;
 
-  // Attempt WebCodecs path (not implemented for container demux yet)
-  const hasWebCodecs = typeof (self as any).VideoDecoder !== "undefined";
-  if (hasWebCodecs) {
+  // Try WebCodecs-based decode in worker (MP4 demux via mp4box.js)
+  try {
+    const sourceBytes = bytes ? bytes : (await (await fetch(url!)).arrayBuffer());
+    // @ts-ignore
+    postMessage({ type: "info", message: "Decoding background video with WebCodecs (worker) if supported..." } as InfoMsg);
+    await decodeWithWebCodecs(sourceBytes, fps, width, height);
+    // @ts-ignore
+    postMessage({ type: "done" } as DoneMsg);
+    return;
+  } catch (err) {
+    // Fallback path via ffmpeg.wasm
     try {
-      // Inform host that WebCodecs is available but falling back for container decode
       // @ts-ignore
-      postMessage({ type: "info", message: "WebCodecs available; using ffmpeg.wasm fallback for container demux." });
+      postMessage({ type: "info", message: "WebCodecs decode unavailable or failed; falling back to ffmpeg.wasm." } as InfoMsg);
     } catch {}
   }
 
+  // Fallback: ffmpeg.wasm frame extraction
   try {
     const ffmpeg = createFFmpeg({ log: false });
     await ffmpeg.load();
@@ -47,7 +155,6 @@ self.onmessage = async (e: MessageEvent<DecodeMsg | { type: "abort" }>) => {
     // Write input file
     let inName = "input.mp4";
     if (url && !bytes) {
-      // Fetch to bytes to avoid CORS issues
       const res = await fetch(url);
       const buf = await res.arrayBuffer();
       ffmpeg.FS("writeFile", inName, new Uint8Array(buf));

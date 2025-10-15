@@ -14,7 +14,8 @@
     "react-dom": "^18.3.1",
     "zustand": "^4.5.2",
     "@ffmpeg/ffmpeg": "^0.12.15",
-    "@ffmpeg/core": "^0.12.6"
+    "@ffmpeg/core": "^0.12.6",
+    "mp4box": "^0.5.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.4",

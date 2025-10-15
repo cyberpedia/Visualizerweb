@@ -73,6 +73,11 @@ const TimelineEditor: React.FC = () => {
     rotation: { enabled: false, step: 1 }
   });
 
+  // pan and space-drag state
+  const [panSec, setPanSec] = useState<number>(0);
+  const [spaceDown, setSpaceDown] = useState<boolean>(false);
+  const [panning, setPanning] = useState<{ startX: number; startPan: number } | null>(null);
+
   // inline bezier segment editor state
   const [inlineBezierEdit, setInlineBezierEdit] = useState<{ prop: PropKey; startIndex: number; dragging: "p1" | "p2" | null } | null>(null);
 
@@ -188,6 +193,10 @@ const TimelineEditor: React.FC = () => {
       <div
         tabIndex={0}
         onKeyDown={(e) => {
+          if ((e.code || e.key) === "Space") {
+            setSpaceDown(true);
+            e.preventDefault();
+          }
           if (!selected) return;
           const dur = isFinite(duration) && duration > 0 ? duration : 60;
 
@@ -284,6 +293,11 @@ const TimelineEditor: React.FC = () => {
               updateLayer(selected.id, { kf: nextKf });
               e.preventDefault();
             }
+          }
+        }}
+        onKeyUp={(e) => {
+          if ((e.code || e.key) === "Space") {
+            setSpaceDown(false);
           }
         }}
         className="mb-2 grid grid-cols-3 gap-2 outline-none"
@@ -665,22 +679,24 @@ const TimelineEditor: React.FC = () => {
             // derive duration and sampling
             const dur = isFinite(duration) && duration > 0 ? duration : 60;
             const samples = 64;
+            const visDur = dur / zoom;
+            const startT = Math.max(0, Math.min(dur - visDur, panSec));
 
-            // compute curve min/max by sampling to scale vertically
+            // compute curve min/max by sampling visible window to scale vertically
             const baseVal = (selected as any)[laneProp] ?? 0;
             const vals: number[] = [];
             for (let i = 0; i <= samples; i++) {
-              const tt = (i / samples) * dur;
+              const tt = startT + (i / samples) * visDur;
               vals.push(interpKF(sortedKfs, tt, baseVal));
             }
             const vMin = Math.min(...vals);
             const vMax = Math.max(...vals);
             const vRange = vMax - vMin || 1;
 
-            // build normalized path (viewBox 0..1000 x, 0..100 y)
+            // build normalized path (viewBox 0..1000/zoom x, 0..100 y)
             let d = "";
             for (let i = 0; i <= samples; i++) {
-              const tt = (i / samples) * dur;
+              const tt = startT + (i / samples) * visDur;
               const val = interpKF(sortedKfs, tt, baseVal);
               const nx = (i / samples) * (1000 / zoom);
               const ny = (1 - (val - vMin) / vRange) * 100;
@@ -712,7 +728,25 @@ const TimelineEditor: React.FC = () => {
             };
 
             return (
-              <div key={laneProp} className="relative w-full h-14 bg-gray-900 border border-gray-800 rounded">
+              <div
+                key={laneProp}
+                className="relative w-full h-14 bg-gray-900 border border-gray-800 rounded"
+                onWheel={(e) => {
+                  e.preventDefault();
+                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  const w = rect.width;
+                  const x = e.clientX - rect.left;
+                  const pointerRatio = Math.max(0, Math.min(1, x / w));
+                  const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                  const visDur = dur / zoom;
+                  const T = panSec + pointerRatio * visDur;
+                  const newZoom = Math.max(0.5, Math.min(4, zoom + Math.sign(e.deltaY) * -0.1));
+                  const newVisDur = dur / newZoom;
+                  const newPan = Math.max(0, Math.min(dur - newVisDur, T - pointerRatio * newVisDur));
+                  setZoom(newZoom);
+                  setPanSec(newPan);
+                }}
+              >
                 <div className="absolute left-2 top-1 text-[11px] text-gray-400">{laneProp}</div>
 
                 {/* curve path */}
@@ -729,9 +763,18 @@ const TimelineEditor: React.FC = () => {
                 <div
                   className="absolute inset-0"
                   onMouseDown={(e) => {
+                    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                    // Space+drag: start panning
+                    if (spaceDown) {
+                      const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                      const visDur = dur / zoom;
+                      const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+                      setPanning({ startX: e.clientX - rect.left, startPan: startTLocal });
+                      e.preventDefault();
+                      return;
+                    }
                     // Alt+Drag starts brush selection
                     if (e.altKey) {
-                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                       const x = e.clientX - rect.left;
                       const y = e.clientY - rect.top;
                       // Alt+Shift => global (all lanes) time selection
@@ -748,7 +791,10 @@ const TimelineEditor: React.FC = () => {
                     const y = e.clientY - rect.top;
                     const w = rect.width;
                     const h = rect.height;
-                    const t = snapTimeExt((x / w) * dur);
+                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                    const visDur = dur / zoom;
+                    const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+                    const t = snapTimeExt(startTLocal + (x / w) * visDur);
                     const valNorm = 1 - Math.max(0, Math.min(1, y / h));
                     const val = vMin + valNorm * vRange;
                     const kf = { time: t, value: val, easing: "linear" as const };
@@ -764,6 +810,18 @@ const TimelineEditor: React.FC = () => {
                     const y = e.clientY - rect.top;
                     const w = rect.width;
                     const h = rect.height;
+                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                    const visDur = dur / zoom;
+                    const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+
+                    // panning with Space
+                    if (panning) {
+                      const dx = (x - panning.startX) / w; // fraction
+                      const dt = dx * visDur;
+                      const newPan = Math.max(0, Math.min(dur - visDur, panning.startPan - dt));
+                      setPanSec(newPan);
+                      return;
+                    }
 
                     // brush update
                     if (brush?.active && brush.lane === laneProp) {
@@ -791,20 +849,23 @@ const TimelineEditor: React.FC = () => {
                     if (draggingIdx == null || draggingProp == null) return;
                     if (draggingProp !== laneProp) return;
 
-                    const t = snapTimeExt(Math.max(0, Math.min(dur, (x / w) * dur)));
+                    const t = snapTimeExt(Math.max(0, Math.min(dur, startTLocal + (x / w) * visDur)));
                     const valNorm = 1 - Math.max(0, Math.min(1, y / h));
                     const val = vMin + valNorm * vRange;
 
                     // group drag time shift
                     if (groupDrag && groupDrag.prop === laneProp && selectedKFs.length > 1) {
                       const dx = (x - groupDrag.startX) / w; // 0..1
-                      const dt = dx * dur;
+                      const dt = dx * visDur;
                       const nextKf = { ...(selected.kf || {}) } as any;
                       for (const s of selectedKFs) {
                         const arr = (nextKf[s.prop] || []).slice();
+                        const baseEntry = groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s.index);
+                        const baseTime = baseEntry ? baseEntry.time : (arr[s.index]?.time ?? 0);
+                        const nt = Math.max(0, Math.min(dur, baseTime + dt));
+                        const ntSnap = snapEnabled ? Math.round(nt / snapStep) * snapStep : nt;
                         if (arr[s.index]) {
-                          const base = groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s(Math.max(0, Math.min(dur, (groupDrag.startTimes.find(st => st.prop === s.prop && st.index === s.index)?.time ?? arr[s.index].time) + dt)));
-                          arr[s.index] = { ...arr[s.index], time: nt };
+                          arr[s.index] = { ...arr[s.index], time: ntSnap };
                           nextKf[s.prop] = arr;
                         }
                       }
@@ -815,16 +876,24 @@ const TimelineEditor: React.FC = () => {
                     }
                   }}
                   onMouseUp={(e) => {
-                    // finalize brush selection
+                    // finalize brush selection or end panning
                     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                     const w = rect.width, h = rect.height;
+                    const dur = isFinite(duration) && duration > 0 ? duration : 60;
+                    const visDur = dur / zoom;
+                    const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+
+                    if (panning) {
+                      setPanning(null);
+                    }
+
                     if (brush?.active && brush.lane === laneProp) {
                       const x0 = Math.min(brush.x0, brush.x1);
                       const y0 = Math.min(brush.y0, brush.y1);
                       const x1 = Math.max(brush.x0, brush.x1);
                       const y1 = Math.max(brush.y0, brush.y1);
-                      const t0 = snapTimeExt((x0 / w) * dur);
-                      const t1 = snapTimeExt((x1 / w) * dur);
+                      const t0 = snapTimeExt(startTLocal + (x0 / w) * visDur);
+                      const t1 = snapTimeExt(startTLocal + (x1 / w) * visDur);
                       const v0 = vMin + (1 - Math.max(0, Math.min(1, y1 / h))) * vRange; // bottom bound
                       const v1 = vMin + (1 - Math.max(0, Math.min(1, y0 / h))) * vRange; // top bound
                       const inRect = ((selected.kf?.[laneProp] as any[]) || [])
@@ -841,14 +910,14 @@ const TimelineEditor: React.FC = () => {
                       // global time-based selection across all lanes
                       const x0 = Math.min(brush.x0, brush.x1);
                       const x1 = Math.max(brush.x0, brush.x1);
-                      const t0 = snapTimeExt((x0 / w) * dur);
-                      const t1 = snapTimeExt((x1 / w) * dur);
+                      const t0 = snapTimeExt(startTLocal + (x0 / w) * visDur);
+                      const t1 = snapTimeExt(startTLocal + (x1 / w) * visDur);
                       const all: Array<{ prop: PropKey; index: number }> = [];
                       for (const p of props) {
                         const arr = ((selected.kf?.[p] as any[]) || []);
                         arr.forEach((k: any, idx: number) => {
                           const kt = k.time ?? 0;
-                          if (kt >= Math.min(t0, t1) && kt <= Math.max(t0, t1)) {
+                          if (kt >= Math.min(t0, t1) && kt <= Math.max(t1, t0)) {
                             all.push({ prop: p, index: idx });
                           }
                         });
@@ -861,7 +930,7 @@ const TimelineEditor: React.FC = () => {
                     setGroupDrag(null);
                     setInlineBezierEdit(null);
                   }}
-                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); setInlineBezierEdit(null); }}
+                  onMouseLeave={() => { setDraggingIdx(null); setDraggingProp(null); setGroupDrag(null); setInlineBezierEdit(null); setPanning(null); }}
                   title={`Click to add keyframe on ${laneProp}`}
                 >
                   {/* grid lines */}
@@ -874,15 +943,19 @@ const TimelineEditor: React.FC = () => {
                   {/* snap guides */}
                   {showGuides && (() => {
                     const countGuides = Math.max(1, Math.floor(dur / laneStep));
-                    return Array.from({ length: countGuides + 1 }).map((_, gi) => (
-                      <div key={`g-${gi}`}
-                        className="absolute top-0 bottom-0 border-l border-indigo-500/30"
-                        style={{
-                          left: `${(Math.min(1, ((gi * laneStep) / dur)) * 100) * (1 / zoom)}%`
-                        }}
-                        title={`${(gi * laneStep).toFixed(2)}s`}
-                      />
-                    ));
+                    const visDur = dur / zoom;
+                    const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+                    return Array.from({ length: countGuides + 1 }).map((_, gi) => {
+                      const gtime = gi * laneStep;
+                      const leftPct = Math.max(0, Math.min(100, ((gtime - startTLocal) / visDur) * 100));
+                      return (
+                        <div key={`g-${gi}`}
+                          className="absolute top-0 bottom-0 border-l border-indigo-500/30"
+                          style={{ left: `${leftPct}%` }}
+                          title={`${gtime.toFixed(2)}s`}
+                        />
+                      );
+                    });
                   })()}
 
                   {/* brush overlay */}
@@ -909,52 +982,60 @@ const TimelineEditor: React.FC = () => {
                     />
                   )}
                   {/* markers */}
-                  {markers.map((m, i) => (
-                    <div key={i}
-                      className="absolute top-0 bottom-0 border-l border-gray-600"
-                      style={{
-                        left: `${(Math.min(1, m / dur) * 100) * (1 / zoom)}%`
-                      }}
-                      title={`${m.toFixed(2)}s`}
-                    />
-                  ))}
+                  {markers.map((m, i) => {
+                    const visDur = dur / zoom;
+                    const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+                    const leftPct = Math.max(0, Math.min(100, ((m - startTLocal) / visDur) * 100));
+                    return (
+                      <div key={i}
+                        className="absolute top-0 bottom-0 border-l border-gray-600"
+                        style={{ left: `${leftPct}%` }}
+                        title={`${m.toFixed(2)}s`}
+                      />
+                    );
+                  })}
                   {/* keyframes for laneProp */}
-                  {sortedKfs.map((k: any, i: number) => (
-                    <div key={i}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-ew-resize"
-                      style={{
-                        left: `${(Math.min(1, k.time / dur) * 100) * (1 / zoom)}%`,
-                        // place marker vertically near curve value (approximate)
-                        top: `${(1 - (Math.max(0, Math.min(1, (k.value - vMin) / vRange)))) * 100}%`
-                      }}
-                      title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
-                      onMouseDown={(ev) => {
-                        setDraggingIdx(i);
-                        setDraggingProp(laneProp);
-                        setActiveKF({ prop: laneProp, index: i });
-                        // selection toggle with Shift
-                        if (ev.shiftKey) {
-                          setSelectedKFs((prev) => {
-                            const exists = prev.find((p) => p.prop === laneProp && p.index === i);
-                            if (exists) return prev.filter((p) => !(p.prop === laneProp && p.index === i));
-                            return [...prev, { prop: laneProp, index: i }];
-                          });
-                        } else {
-                          setSelectedKFs([{ prop: laneProp, index: i }]);
-                        }
-                        // prepare group drag start across all selected lanes
-                        const curSelected = ev.shiftKey ? selectedKFs : [{ prop: laneProp, index: i }];
-                        const nextStartTimes: Array<{ prop: PropKey; index: number; time: number }> = [];
-                        for (const sel of curSelected) {
-                          const arrLane = ((selected.kf?.[sel.prop] as any[]) || []).slice();
-                          const cur = arrLane[sel.index];
-                          nextStartTimes.push({ prop: sel.prop, index: sel.index, time: cur?.time ?? 0 });
-                        }
-                        const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
-                        setGroupDrag({ prop: laneProp, startX: ev.clientX - rect.left, startTimes: nextStartTimes });
-                      }}
-                    />
-                  ))}
+                  {sortedKfs.map((k: any, i: number) => {
+                    const visDur = dur / zoom;
+                    const startTLocal = Math.max(0, Math.min(dur - visDur, panSec));
+                    const leftPct = Math.max(0, Math.min(100, ((k.time - startTLocal) / visDur) * 100));
+                    return (
+                      <div key={i}
+                        className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-brand-500 rounded-full cursor-ew-resize"
+                        style={{
+                          left: `${leftPct}%`,
+                          // place marker vertically near curve value (approximate)
+                          top: `${(1 - (Math.max(0, Math.min(1, (k.value - vMin) / vRange)))) * 100}%`
+                        }}
+                        title={`t=${k.time.toFixed(2)}s, v=${k.value}`}
+                        onMouseDown={(ev) => {
+                          setDraggingIdx(i);
+                          setDraggingProp(laneProp);
+                          setActiveKF({ prop: laneProp, index: i });
+                          // selection toggle with Shift
+                          if (ev.shiftKey) {
+                            setSelectedKFs((prev) => {
+                              const exists = prev.find((p) => p.prop === laneProp && p.index === i);
+                              if (exists) return prev.filter((p) => !(p.prop === laneProp && p.index === i));
+                              return [...prev, { prop: laneProp, index: i }];
+                            });
+                          } else {
+                            setSelectedKFs([{ prop: laneProp, index: i }]);
+                          }
+                          // prepare group drag start across all selected lanes
+                          const curSelected = ev.shiftKey ? selectedKFs : [{ prop: laneProp, index: i }];
+                          const nextStartTimes: Array<{ prop: PropKey; index: number; time: number }> = [];
+                          for (const sel of curSelected) {
+                            const arrLane = ((selected.kf?.[sel.prop] as any[]) || []).slice();
+                            const cur = arrLane[sel.index];
+                            nextStartTimes.push({ prop: sel.prop, index: sel.index, time: cur?.time ?? 0 });
+                          }
+                          const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
+                          setGroupDrag({ prop: laneProp, startX: ev.clientX - rect.left, startTimes: nextStartTimes });
+                        }}
+                      />
+                    );
+                  })}
 
                   {/* inline bezier segment editors */}
                   {sortedKfs.map((a: any, j: number) => {
@@ -963,7 +1044,9 @@ const TimelineEditor: React.FC = () => {
                     if ((a.easing ?? "linear") !== "bezier") return null;
                     const bz = a.bezier || { x1: 0.25, y1: 0.1, x2: 0.25, y2: 1 };
                     const mid = (a.time + b.time) * 0.5;
-                    const leftPct = (Math.min(1, mid / dur) * 100) * (1 / zoom);
+                    const visDur2 = dur / zoom;
+                    const startTLocal2 = Math.max(0, Math.min(dur - visDur2, panSec));
+                    const leftPct = Math.max(0, Math.min(100, ((mid - startTLocal2) / visDur2) * 100));
                     // mini box 64x64 positioned near segment center
                     const box = (
                       <div
@@ -1020,9 +1103,9 @@ const TimelineEditor: React.FC = () => {
                     );
 
                     // inline overlay handles directly on lane
-                    const left1 = (Math.min(1, (a.time + (b.time - a.time) * bz.x1) / dur) * 100) * (1 / zoom);
+                    const left1 = Math.max(0, Math.min(100, (((a.time + (b.time - a.time) * bz.x1) - startTLocal2) / visDur2) * 100));
                     const top1 = (1 - bz.y1) * 100;
-                    const left2 = (Math.min(1, (a.time + (b.time - a.time) * bz.x2) / dur) * 100) * (1 / zoom);
+                    const left2 = Math.max(0, Math.min(100, (((a.time + (b.time - a.time) * bz.x2) - startTLocal2) / visDur2) * 100));
                     const top2 = (1 - bz.y2) * 100;
 
                     return showHandles ? (
