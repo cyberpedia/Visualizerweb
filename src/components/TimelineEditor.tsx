@@ -81,6 +81,8 @@ const TimelineEditor: React.FC = () => {
 
   // show/hide on-curve bezier handle overlays
   const [showHandles, setShowHandles] = useState<boolean>(true);
+  // show lane snap guides
+  const [showGuides, setShowGuides] = useState<boolean>(false);
 
   // undo/redo stacks for selected layer's keyframes
   const [undoStack, setUndoStack] = useState<any[]>([]);
@@ -600,6 +602,15 @@ const TimelineEditor: React.FC = () => {
           />
         </label>
 
+        <label className="text-xs ml-4 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showGuides}
+            onChange={(e) => setShowGuides(e.target.checked)}
+          />
+          Show guides
+        </label>
+
         <button
           className="ml-4 px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-xs"
           disabled={!selected}
@@ -638,7 +649,15 @@ const TimelineEditor: React.FC = () => {
 
       {/* Multi-lane timeline tracks */}
       {selected && (
-        <div className="space-y-2 mb-3">
+        <div
+          className="space-y-2 mb-3"
+          onWheel={(e) => {
+            // wheel zoom
+            const delta = Math.sign(e.deltaY);
+            setZoom((z) => Math.max(0.5, Math.min(4, z + delta * -0.1)));
+            e.preventDefault();
+          }}
+        >
           {props.map((laneProp) => {
             const kfs = (selected.kf?.[laneProp] as any[]) || [];
             const sortedKfs = kfs.slice().sort((a, b) => a.time - b.time);
@@ -852,6 +871,19 @@ const TimelineEditor: React.FC = () => {
                       style={{ left: `${(i / 10) * 100}%` }}
                     />
                   ))}
+                  {/* snap guides */}
+                  {showGuides && (() => {
+                    const countGuides = Math.max(1, Math.floor(dur / laneStep));
+                    return Array.from({ length: countGuides + 1 }).map((_, gi) => (
+                      <div key={`g-${gi}`}
+                        className="absolute top-0 bottom-0 border-l border-indigo-500/30"
+                        style={{
+                          left: `${(Math.min(1, ((gi * laneStep) / dur)) * 100) * (1 / zoom)}%`
+                        }}
+                        title={`${(gi * laneStep).toFixed(2)}s`}
+                      />
+                    ));
+                  })()}
 
                   {/* brush overlay */}
                   {brush?.active && brush.lane === laneProp && (
