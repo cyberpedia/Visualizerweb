@@ -865,6 +865,17 @@ const TimelineEditor: React.FC = () => {
                       }}
                     />
                   )}
+                  {brush?.active && brush.lane === null && (
+                    <div
+                      className="absolute border border-indigo-400/60 bg-indigo-400/8"
+                      style={{
+                        left: `${Math.min(brush.x0, brush.x1)}px`,
+                        top: `0px`,
+                        width: `${Math.abs(brush.x1 - brush.x0)}px`,
+                        height: `100%`
+                      }}
+                    />
+                  )}
                   {/* markers */}
                   {markers.map((m, i) => (
                     <div key={i}
